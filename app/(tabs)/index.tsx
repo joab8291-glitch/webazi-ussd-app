@@ -4,6 +4,8 @@ import type { EventSubscription } from 'expo-modules-core';
 import SmsListener from '../../modules/sms-listener/src/SmsListenerModule';
 import type { SmsReceivedPayload, SimSlotInfo } from '../../modules/sms-listener/src/SmsListener.types';
 import UssdExecutor from '../../modules/ussd-executor/src/UssdExecutorModule';
+import { processIncomingSms } from '../../modules/offer-matcher/matcher';
+import { DataPlan } from '../../modules/offer-matcher/types';
 
 const requestSmsPermissions = async () => {
   if (Platform.OS !== 'android') return true;
@@ -39,102 +41,60 @@ export default function TestScreen() {
   const [simSlots, setSimSlots] = useState<SimSlotInfo[] | null>(null);
   const [listening, setListening] = useState(false);
   const [messages, setMessages] = useState<SmsReceivedPayload[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [helloResult, setHelloResult] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null)
+const [helloResult, setHelloResult] = useState<string | null>(null);
 
-  const [ussdCode, setUssdCode] = useState('*334#');
-  const [ussdResult, setUssdResult] = useState<string | null>(null);
-  const [ussdLoading, setUssdLoading] = useState(false);
+const [ussdCode, setUssdCode] = useState('*334#');
+const [ussdResult, setUssdResult] = useState<string | null>(null);
+const [ussdLoading, setUssdLoading] = useState(false);
+
+const [matchLog, setMatchLog] = useState<string[]>([]);
 
   useEffect(() => {
-    const subscription: EventSubscription = SmsListener.addListener(
-      'onSmsReceived',
-      (event: SmsReceivedPayload) => {
-        setMessages((prev) => [event, ...prev]);
+  const subscription: EventSubscription = SmsListener.addListener(
+    'onSmsReceived',
+    (event: SmsReceivedPayload) => {
+      setMessages((prev) => [event, ...prev]);
+
+      const match = processIncomingSms(event.body);
+
+      if (match.status === 'matched') {
+        setMatchLog((prev) => [
+          `✅ Matched "${match.plan.name}" (KES ${match.payment.amount}) from ${match.payment.sender}`,
+          ...prev,
+        ]);
+        autoDial(match.plan);
+      } else if (match.status === 'no_match') {
+        setMatchLog((prev) => [
+          `⚠️ Payment of KES ${match.payment.amount} from ${match.payment.sender} — no matching plan`,
+          ...prev,
+        ]);
       }
+      // 'not_a_payment' — silently ignored, not logged (e.g. balance checks, other SMS)
+    }
+  );
+  return () => subscription.remove();
+}, []);
+
+const autoDial = async (plan: DataPlan) => {
+  try {
+    const ok = await requestCallPermission();
+    if (!ok) {
+      setMatchLog((prev) => [`❌ CALL_PHONE denied — cannot auto-dial ${plan.name}`, ...prev]);
+      return;
+    }
+    const timeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Auto-dial timed out after 15s')), 15000)
     );
-    return () => subscription.remove();
-  }, []);
-
-  const handleGetSimSlots = async () => {
-    try {
-      const ok = await requestSmsPermissions();
-      if (!ok) {
-        setError('Permissions denied');
-        return;
-      }
-      const result = SmsListener.getSimSlots();
-      setSimSlots(result);
-      setError(null);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    }
-  };
-
-  const handleStartListening = async () => {
-    try {
-      const ok = await requestSmsPermissions();
-      if (!ok) {
-        setError('Permissions denied');
-        return;
-      }
-      SmsListener.startListening();
-      setListening(true);
-      setError(null);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    }
-  };
-
-  const handleStopListening = () => {
-    try {
-      SmsListener.stopListening();
-      setListening(false);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    }
-  };
-
-  const handleTestUssdModule = () => {
-    try {
-      setHelloResult(UssdExecutor.hello());
-      setError(null);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    }
-  };
-
-  const handleStartUssd = async () => {
-    setUssdLoading(true);
-    setUssdResult(null);
-    try {
-      const ok = await requestCallPermission();
-      if (!ok) {
-        setError('CALL_PHONE permission denied');
-        setUssdLoading(false);
-        return;
-      }
-
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('Timed out after 15s — Accessibility Service may not be reading the dialog')),
-          15000
-        )
-      );
-
-      const result = await Promise.race([
-        UssdExecutor.startUssd(ussdCode, [], -1),
-        timeout,
-      ]);
-
-      setUssdResult(result);
-      setError(null);
-    } catch (e: any) {
-      setError(String(e?.message ?? e));
-    } finally {
-      setUssdLoading(false);
-    }
-  };
+    const result = await Promise.race([
+      UssdExecutor.startUssd(plan.ussdCode, plan.followUpInputs, plan.simSlot),
+      timeout,
+    ]);
+    setMatchLog((prev) => [`📞 Auto-dial result for ${plan.name}: ${result}`, ...prev]);
+  } catch (e: any) {
+    setMatchLog((prev) => [`❌ Auto-dial failed for ${plan.name}: ${String(e?.message ?? e)}`, ...prev]);
+  }
+};
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -181,6 +141,20 @@ export default function TestScreen() {
         <Text style={styles.subtitle}>Received SMS ({messages.length})</Text>
         {messages.map((m, i) => (
           <Text key={i} style={styles.mono}>{JSON.stringify(m)}</Text>
+        ))}
+      </View>
+<View style={styles.section}>
+        <Text style={styles.subtitle}>Received SMS ({messages.length})</Text>
+        {messages.map((m, i) => (
+          <Text key={i} style={styles.mono}>{JSON.stringify(m)}</Text>
+        ))}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.subtitle}>Offer Matcher Log</Text>
+        {matchLog.length === 0 && <Text style={styles.mono}>No matches yet</Text>}
+        {matchLog.map((line, i) => (
+          <Text key={i} style={styles.mono}>{line}</Text>
         ))}
       </View>
     </ScrollView>
