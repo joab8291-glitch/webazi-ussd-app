@@ -114,9 +114,19 @@ export default function TestScreen() {
         setUssdLoading(false);
         return;
       }
-      // subscriptionId -1 = default SIM. Use a real subscriptionId from
-      // getSimSlots() (e.g. 1 for Safaricom) once you know which slot to dial from.
-      const result = await UssdExecutor.startUssd(ussdCode, [], -1);
+
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error('Timed out after 15s — Accessibility Service may not be reading the dialog')),
+          15000
+        )
+      );
+
+      const result = await Promise.race([
+        UssdExecutor.startUssd(ussdCode, [], -1),
+        timeout,
+      ]);
+
       setUssdResult(result);
       setError(null);
     } catch (e: any) {
