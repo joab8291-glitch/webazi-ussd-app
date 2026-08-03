@@ -19,6 +19,22 @@ const requestSmsPermissions = async () => {
   );
 };
 
+const requestCallPermission = async () => {
+  if (Platform.OS !== 'android') return true;
+
+  const granted = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.CALL_PHONE,
+    {
+      title: 'Phone Call Permission',
+      message: 'This app needs permission to dial USSD codes.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Deny',
+    }
+  );
+
+  return granted === PermissionsAndroid.RESULTS.GRANTED;
+};
+
 export default function TestScreen() {
   const [simSlots, setSimSlots] = useState<SimSlotInfo[] | null>(null);
   const [listening, setListening] = useState(false);
@@ -92,6 +108,12 @@ export default function TestScreen() {
     setUssdLoading(true);
     setUssdResult(null);
     try {
+      const ok = await requestCallPermission();
+      if (!ok) {
+        setError('CALL_PHONE permission denied');
+        setUssdLoading(false);
+        return;
+      }
       // subscriptionId -1 = default SIM. Use a real subscriptionId from
       // getSimSlots() (e.g. 1 for Safaricom) once you know which slot to dial from.
       const result = await UssdExecutor.startUssd(ussdCode, [], -1);
