@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { View, Text, Button, ScrollView, StyleSheet, PermissionsAndroid, Platform } from 'react-native';
+import { View, Text, Button, ScrollView, StyleSheet, PermissionsAndroid, Platform, TextInput } from 'react-native';
 import type { EventSubscription } from 'expo-modules-core';
 import SmsListener from '../../modules/sms-listener/src/SmsListenerModule';
 import type { SmsReceivedPayload, SimSlotInfo } from '../../modules/sms-listener/src/SmsListener.types';
@@ -25,6 +25,10 @@ export default function TestScreen() {
   const [messages, setMessages] = useState<SmsReceivedPayload[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [helloResult, setHelloResult] = useState<string | null>(null);
+
+  const [ussdCode, setUssdCode] = useState('*334#');
+  const [ussdResult, setUssdResult] = useState<string | null>(null);
+  const [ussdLoading, setUssdLoading] = useState(false);
 
   useEffect(() => {
     const subscription: EventSubscription = SmsListener.addListener(
@@ -84,6 +88,22 @@ export default function TestScreen() {
     }
   };
 
+  const handleStartUssd = async () => {
+    setUssdLoading(true);
+    setUssdResult(null);
+    try {
+      // subscriptionId -1 = default SIM. Use a real subscriptionId from
+      // getSimSlots() (e.g. 1 for Safaricom) once you know which slot to dial from.
+      const result = await UssdExecutor.startUssd(ussdCode, [], -1);
+      setUssdResult(result);
+      setError(null);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    } finally {
+      setUssdLoading(false);
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Webazi USSD App — Native Module Test</Text>
@@ -105,6 +125,22 @@ export default function TestScreen() {
         <Text style={styles.subtitle}>USSD Executor (stub)</Text>
         <Button title="Call hello()" onPress={handleTestUssdModule} />
         <Text style={styles.mono}>{helloResult ?? 'Not called yet'}</Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.subtitle}>USSD Executor — Live Dial</Text>
+        <TextInput
+          value={ussdCode}
+          onChangeText={setUssdCode}
+          placeholder="*334#"
+          style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, borderRadius: 6 }}
+        />
+        <Button
+          title={ussdLoading ? 'Dialing...' : 'Start USSD'}
+          onPress={handleStartUssd}
+          disabled={ussdLoading}
+        />
+        <Text style={styles.mono}>{ussdResult ?? 'No result yet'}</Text>
       </View>
 
       {error && <Text style={styles.error}>Error: {error}</Text>}
