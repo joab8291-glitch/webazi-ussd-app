@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["UssdExecutorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.ussdexecutor.UssdExecutorModule"]
+  }
+}

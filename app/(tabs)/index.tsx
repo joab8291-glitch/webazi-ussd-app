@@ -1,98 +1,129 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, Button, ScrollView, StyleSheet, PermissionsAndroid, Platform } from 'react-native';
+import type { EventSubscription } from 'expo-modules-core';
+import SmsListener from '../../modules/sms-listener/src/SmsListenerModule';
+import type { SmsReceivedPayload, SimSlotInfo } from '../../modules/sms-listener/src/SmsListener.types';
+import UssdExecutor from '../../modules/ussd-executor/src/UssdExecutorModule';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const requestSmsPermissions = async () => {
+  if (Platform.OS !== 'android') return true;
 
-export default function HomeScreen() {
+  const granted = await PermissionsAndroid.requestMultiple([
+    PermissionsAndroid.PERMISSIONS.READ_SMS,
+    PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+    PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+  ]);
+
+  return Object.values(granted).every(
+    (status) => status === PermissionsAndroid.RESULTS.GRANTED
+  );
+};
+
+export default function TestScreen() {
+  const [simSlots, setSimSlots] = useState<SimSlotInfo[] | null>(null);
+  const [listening, setListening] = useState(false);
+  const [messages, setMessages] = useState<SmsReceivedPayload[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [helloResult, setHelloResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    const subscription: EventSubscription = SmsListener.addListener(
+      'onSmsReceived',
+      (event: SmsReceivedPayload) => {
+        setMessages((prev) => [event, ...prev]);
+      }
+    );
+    return () => subscription.remove();
+  }, []);
+
+  const handleGetSimSlots = async () => {
+    try {
+      const ok = await requestSmsPermissions();
+      if (!ok) {
+        setError('Permissions denied');
+        return;
+      }
+      const result = SmsListener.getSimSlots();
+      setSimSlots(result);
+      setError(null);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
+  const handleStartListening = async () => {
+    try {
+      const ok = await requestSmsPermissions();
+      if (!ok) {
+        setError('Permissions denied');
+        return;
+      }
+      SmsListener.startListening();
+      setListening(true);
+      setError(null);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
+  const handleStopListening = () => {
+    try {
+      SmsListener.stopListening();
+      setListening(false);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
+  const handleTestUssdModule = () => {
+    try {
+      setHelloResult(UssdExecutor.hello());
+      setError(null);
+    } catch (e: any) {
+      setError(String(e?.message ?? e));
+    }
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Webazi USSD App — Native Module Test</Text>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <View style={styles.section}>
+        <Text style={styles.subtitle}>SMS Listener</Text>
+        <Button title="Get SIM Slots" onPress={handleGetSimSlots} />
+        <Text style={styles.mono}>
+          {simSlots ? JSON.stringify(simSlots, null, 2) : 'Not fetched yet'}
+        </Text>
+        <Button
+          title={listening ? 'Stop Listening' : 'Start Listening'}
+          onPress={listening ? handleStopListening : handleStartListening}
+        />
+        <Text>{listening ? '✅ SMS listener active' : '⏸ Not listening'}</Text>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.subtitle}>USSD Executor (stub)</Text>
+        <Button title="Call hello()" onPress={handleTestUssdModule} />
+        <Text style={styles.mono}>{helloResult ?? 'Not called yet'}</Text>
+      </View>
+
+      {error && <Text style={styles.error}>Error: {error}</Text>}
+
+      <View style={styles.section}>
+        <Text style={styles.subtitle}>Received SMS ({messages.length})</Text>
+        {messages.map((m, i) => (
+          <Text key={i} style={styles.mono}>{JSON.stringify(m)}</Text>
+        ))}
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
+  container: { padding: 20, gap: 16 },
+  title: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
+  subtitle: { fontSize: 15, fontWeight: '600', marginBottom: 6 },
+  section: { gap: 8, marginBottom: 16 },
+  mono: { fontFamily: 'monospace', fontSize: 12, color: '#333' },
+  error: { color: 'red', marginBottom: 12 },
 });
