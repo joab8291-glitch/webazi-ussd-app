@@ -52,31 +52,35 @@ const [matchLog, setMatchLog] = useState<string[]>([]);
 
   useEffect(() => {
   const subscription: EventSubscription = SmsListener.addListener(
-    'onSmsReceived',
-    (event: SmsReceivedPayload) => {
-      setMessages((prev) => [event, ...prev]);
+  'onSmsReceived',
+  (event: SmsReceivedPayload) => {
+    setMessages((prev) => [event, ...prev]);
+    const match = processIncomingSms(event.body);
 
-      const match = processIncomingSms(event.body);
-
-      if (match.status === 'matched') {
-        setMatchLog((prev) => [
-          `✅ Matched "${match.plan.name}" (KES ${match.payment.amount}) from ${match.payment.sender}`,
-          ...prev,
-        ]);
-        autoDial(match.plan);
-      } else if (match.status === 'no_match') {
-        setMatchLog((prev) => [
-          `⚠️ Payment of KES ${match.payment.amount} from ${match.payment.sender} — no matching plan`,
-          ...prev,
-        ]);
-      }
-      // 'not_a_payment' — silently ignored, not logged (e.g. balance checks, other SMS)
+    if (match.status === 'matched') {
+      setMatchLog((prev) => [
+        `✅ ${match.plan.name} for ${match.payment.phone} — dialing ${match.resolvedUssd}`,
+        ...prev,
+      ]);
+      autoDial(match.plan, match.resolvedUssd);
+    } else if (match.status === 'missing_phone') {
+      setMatchLog((prev) => [
+        `⚠️ Matched "${match.plan.name}" but couldn't extract phone number from SMS`,
+        ...prev,
+      ]);
+    } else if (match.status === 'no_match') {
+      setMatchLog((prev) => [
+        `⚠️ Payment of KES ${match.payment.amount} — no matching plan`,
+        ...prev,
+      ]);
     }
-  );
+  }
+);
+     
   return () => subscription.remove();
 }, []);
 
-const autoDial = async (plan: DataPlan) => {
+const autoDial = async (plan: DataPlan, resolvedUssd: string) => {
   try {
     const ok = await requestCallPermission();
     if (!ok) {
@@ -87,10 +91,10 @@ const autoDial = async (plan: DataPlan) => {
       setTimeout(() => reject(new Error('Auto-dial timed out after 15s')), 15000)
     );
     const result = await Promise.race([
-      UssdExecutor.startUssd(plan.ussdCode, plan.followUpInputs, plan.simSlot),
+      UssdExecutor.startUssd(resolvedUssd, plan.followUpInputs, plan.simSlot),
       timeout,
     ]);
-    setMatchLog((prev) => [`📞 Auto-dial result for ${plan.name}: ${result}`, ...prev]);
+    setMatchLog((prev) => [`📞 ${plan.name} result: ${result}`, ...prev]);
   } catch (e: any) {
     setMatchLog((prev) => [`❌ Auto-dial failed for ${plan.name}: ${String(e?.message ?? e)}`, ...prev]);
   }
