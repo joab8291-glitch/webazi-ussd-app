@@ -3,11 +3,9 @@ package expo.modules.ussdexecutor
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
+import android.provider.Settings
 import android.telecom.TelecomManager
-import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
-import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -18,80 +16,65 @@ class UssdExecutorModule : Module() {
 
     Events("onUssdResult")
 
-    AsyncFunction("startUssd") { code: String, inputs: List<String>, subscriptionId: Int, promise: Promise ->
+    // Checks whether the Accessibility Service is enabled — call this before dialing
+    Function("isAccessibilityEnabled") {
       val context = appContext.reactContext
-      if (context == null) {
-        promise.reject("NO_CONTEXT", "React context unavailable", null)
-        return@AsyncFunction
+      var enabled = false
+
+      if (context != null) {
+        val enabledServices = Settings.Secure.getString(
+          context.contentResolver,
+          Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        )
+        enabled = enabledServices?.contains(context.packageName) == true
       }
 
-      UssdAccessibilityService.pendingInputs = inputs.toMutableList()
-
-      UssdAccessibilityService.onResult = { resultText ->
-        sendEvent("onUssdResult", mapOf("result" to resultText))
-        promise.resolve(resultText)
-        UssdAccessibilityService.onResult = null
-      }
-
-      try {
-        dialUssd(context, code, subscriptionId)
-      } catch (e: SecurityException) {
-        promise.reject("PERMISSION_DENIED", "CALL_PHONE permission not granted", e)
-      } catch (e: Exception) {
-        promise.reject("DIAL_FAILED", e.message ?: "Failed to dial USSD code", e)
-      }
+      enabled
     }
 
-    Function("isAccessibilityServiceEnabled") {
+    // Opens system Accessibility settings so the user can manually enable the service
+    Function("openAccessibilitySettings") {
       val context = appContext.reactContext
-      if (context == null) return@Function false
-      isAccessibilityEnabled(context)
-    }
-  }
-
-  private fun dialUssd(context: Context, code: String, subscriptionId: Int) {
-    val encoded = code.replace("#", Uri.encode("#"))
-    val uri = Uri.parse("tel:$encoded")
-
-    val intent = Intent(Intent.ACTION_CALL, uri).apply {
-      flags = Intent.FLAG_ACTIVITY_NEW_TASK
-    }
-
-    if (subscriptionId != -1) {
-      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-        intent.putExtra("android.telecom.extra.PHONE_ACCOUNT_HANDLE", getPhoneAccountHandle(context, subscriptionId))
-      } else {
-        intent.putExtra("com.android.phone.extra.slot", subscriptionId)
-        intent.putExtra("simSlot", subscriptionId)
+      if (context != null) {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+        intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        context.startActivity(intent)
       }
     }
 
-    context.startActivity(intent)
-  }
+    // Dials a USSD code on the given SIM slot, queues follow-up menu inputs, and reports the result
+    Function("dialUssd") { ussdCode: String, subscriptionId: Int, menuInputs: List<String> ->
+      val context = appContext.reactContext
 
-  private fun getPhoneAccountHandle(context: Context, subscriptionId: Int): android.telecom.PhoneAccountHandle? {
-    return try {
-      val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-      val accountHandles = telecomManager.callCapablePhoneAccounts
-      accountHandles.firstOrNull { handle ->
-        val account = telecomManager.getPhoneAccount(handle)
-        account?.let {
-          val subManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-          val info = subManager.activeSubscriptionInfoList?.find { it.subscriptionId == subscriptionId }
-          info != null && it.label?.toString()?.contains(info.carrierName ?: "") == true
-        } ?: false
+      if (context != null) {
+        UssdAccessibilityService.pendingInputs = menuInputs.toMutableList()
+        UssdAccessibilityService.onResult = { resultText ->
+          sendEvent("onUssdResult", mapOf("result" to resultText, "success" to true))
+        }
+
+        try {
+          val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+          val uri = Uri.fromParts("tel", Uri.encode(ussdCode), null)
+          val intent = Intent(Intent.ACTION_CALL, uri)
+          intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+
+          // Target the specific SIM slot if the phone/telecom account supports it
+          val accountHandles = telecomManager.callCapablePhoneAccounts
+          val targetHandle = accountHandles?.find { handle ->
+            val account = telecomManager.getPhoneAccount(handle)
+            account?.extras?.getInt("subscription_id", -1) == subscriptionId
+          }
+          if (targetHandle != null) {
+            intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, targetHandle)
+          }
+
+          context.startActivity(intent)
+        } catch (e: SecurityException) {
+          sendEvent("onUssdResult", mapOf("result" to "Missing CALL_PHONE permission", "success" to false))
+        } catch (e: Exception) {
+          sendEvent("onUssdResult", mapOf("result" to (e.message ?: "Unknown error"), "success" to false))
+        }
       }
-    } catch (e: SecurityException) {
-      null
     }
-  }
-
-  private fun isAccessibilityEnabled(context: Context): Boolean {
-    val expectedServiceName = "${context.packageName}/${UssdAccessibilityService::class.java.canonicalName}"
-    val enabledServices = android.provider.Settings.Secure.getString(
-      context.contentResolver,
-      android.provider.Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-    ) ?: return false
-    return enabledServices.contains(expectedServiceName)
   }
 }
