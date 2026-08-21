@@ -1,50 +1,96 @@
-# Welcome to your Expo app 👋
+# Webazi USSD App
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Android (Expo) companion app that **auto-fulfills data / airtime orders** by:
 
-## Get started
+1. Listening for M-Pesa payment SMS  
+2. Matching amount → Bingwa / Tunukiwa / SMS plan  
+3. Dialing the correct USSD code via Accessibility  
+4. Optionally pulling pending STK transactions from the backend poller  
+5. Notifying customers on WhatsApp (via backend proxy)
 
-1. Install dependencies
+**Backend (STK Push + transactions):** https://webazi-digital-solutions.onrender.com
 
-   ```bash
-   npm install
-   ```
+---
 
-2. Start the app
+## Architecture
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+┌─────────────────┐     SMS      ┌──────────────────┐
+│  Customer pays  │ ──────────► │  smsAutomation   │
+│  (M-Pesa / STK) │             │  offer-matcher   │
+└────────┬────────┘             └────────┬─────────┘
+         │                               │
+         │ pending txn                   │ dialUssd()
+         ▼                               ▼
+┌─────────────────┐             ┌──────────────────┐
+│  Backend API    │◄──poller───│  UssdExecutor     │
+│  (Render)       │             │  (native module) │
+└────────┬────────┘             └──────────────────┘
+         │
+         │ /whatsapp/notify
+         ▼
+┌─────────────────┐
+│  WhatsApp Cloud │
+│  API (Meta)     │
+└─────────────────┘
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+### App tabs
+| Tab | Purpose |
+|-----|---------|
+| **Home** | Automation toggles (SMS + backend poller), status chips, live activity log |
+| **Orders** | Transaction list with filter, requeue / mark done / WhatsApp chat |
+| **Plans** | All DATA_PLANS with search + test dial |
+| **Settings** | Till SIM selection, Accessibility, manual USSD, WhatsApp config |
 
-## Learn more
+---
 
-To learn more about developing your project with Expo, look at the following resources:
+## Requirements
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- Android device or emulator with a **development build** (native modules need custom native code)
+- Permissions: `READ_SMS`, `RECEIVE_SMS`, `READ_PHONE_STATE`, `CALL_PHONE`, Accessibility service
+- Expo SDK 54
 
-## Join the community
+## Setup
 
-Join our community of developers creating universal apps.
+```bash
+npm install
+npx expo prebuild   # if you need native projects
+npx expo run:android
+```
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+Or with EAS:
+
+```bash
+eas build --profile development --platform android
+```
+
+## Backend endpoints used
+
+| Method | Path | Use |
+|--------|------|-----|
+| GET | `/health` | Connectivity check |
+| GET | `/transactions/pending` | Poller |
+| GET | `/transactions` | Orders screen |
+| POST | `/transactions/:id/complete` | Mark fulfilled |
+| POST | `/transactions/:id/fail` | Mark failed |
+| POST | `/transactions/:id/requeue` | Retry |
+| POST | `/whatsapp/notify` | *(to implement)* Customer WhatsApp messages |
+| POST | `/whatsapp/webhook` | *(to implement)* Meta Cloud API inbound |
+
+## WhatsApp (backend work remaining)
+
+The mobile app already calls `POST /whatsapp/notify` when deliveries succeed/fail.
+Implement that route on the Render backend using the Meta WhatsApp Cloud API, and optionally wire `/whatsapp/webhook` so customers can order via WhatsApp chat (create a pending transaction → existing poller fulfills).
+
+See `services/whatsapp.ts` for payload shapes and notes.
+
+## Native modules
+
+- `modules/sms-listener` — SIM slots + SMS events
+- `modules/ussd-executor` — `dialUssd(code, subscriptionId, menuInputs)` + Accessibility
+- `modules/offer-matcher` — payment SMS parse + plan match
+
+---
+
+Built with Expo Router + Zustand.
