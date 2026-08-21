@@ -12,29 +12,52 @@ export type Transaction = {
   updated_at: string;
 };
 
-export async function fetchPending(): Promise<Transaction[]> {
-  const res = await fetch(`${BASE_URL}/transactions/pending`);
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options?.headers ?? {}),
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`API ${res.status}: ${text || res.statusText}`);
+  }
+
+  // Some endpoints return empty body
+  const contentType = res.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    return undefined as T;
+  }
   return res.json();
+}
+
+export async function fetchPending(): Promise<Transaction[]> {
+  return request<Transaction[]>('/transactions/pending');
 }
 
 export async function fetchAll(status?: string): Promise<Transaction[]> {
-  const url = status ? `${BASE_URL}/transactions?status=${status}` : `${BASE_URL}/transactions`;
-  const res = await fetch(url);
-  return res.json();
+  const url = status ? `/transactions?status=${encodeURIComponent(status)}` : '/transactions';
+  return request<Transaction[]>(url);
 }
 
 export async function reportComplete(id: number): Promise<void> {
-  await fetch(`${BASE_URL}/transactions/${id}/complete`, { method: 'POST' });
+  await request(`/transactions/${id}/complete`, { method: 'POST' });
 }
 
 export async function reportFail(id: number, reason: string): Promise<void> {
-  await fetch(`${BASE_URL}/transactions/${id}/fail`, {
+  await request(`/transactions/${id}/fail`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ reason }),
   });
 }
 
 export async function requeue(id: number): Promise<void> {
-  await fetch(`${BASE_URL}/transactions/${id}/requeue`, { method: 'POST' });
+  await request(`/transactions/${id}/requeue`, { method: 'POST' });
+}
+
+export async function healthCheck(): Promise<{ status: string; timestamp?: string }> {
+  return request('/health');
 }
