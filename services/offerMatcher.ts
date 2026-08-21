@@ -1,54 +1,85 @@
 /**
- * Backend-oriented offer matcher used by the transaction poller.
- * Aligns with modules/offer-matcher DATA_PLANS where amounts match.
+ * Fulfillment planner.
+ *
+ * Primary product: Safaricom Sambaza airtime (any amount, chunked at KES 10,000).
+ * Optional: exact-match DATA_PLANS (Bingwa / Tunukiwa) if you enable that mode.
  */
 
-import { DATA_PLANS } from '../modules/offer-matcher/plans';
-import type { DataPlan } from '../modules/offer-matcher/types';
+import {
+  buildSambazaPlan,
+  describePlan,
+  SAMBAZA_MAX_PER_TX,
+  type SambazaPlan,
+} from './sambaza';
+
+export type FulfillmentMode = 'sambaza' | 'data_plan';
+
+/** Default product line for Webazi */
+export const DEFAULT_MODE: FulfillmentMode = 'sambaza';
+
+export type FulfillmentJob = {
+  mode: 'sambaza';
+  plan: SambazaPlan;
+  summary: string;
+  /** USSD codes to dial in order from the till SIM */
+  dials: { ussdCode: string; amount: number; label: string }[];
+};
+
+/**
+ * Turn a paid transaction (phone + amount) into one or more USSD dials.
+ *
+ * Examples:
+ *   amount 500   → 1 dial  *140*2547…*500#
+ *   amount 10000 → 1 dial  *140*2547…*10000#
+ *   amount 70000 → 7 dials *140*2547…*10000#  (×7)
+ *   amount 25500 → 3 dials 10000 + 10000 + 5500
+ */
+export function planFulfillment(phone: string, amount: number): FulfillmentJob | null {
+  const plan = buildSambazaPlan(phone, amount);
+  if (!plan) return null;
+
+  return {
+    mode: 'sambaza',
+    plan,
+    summary: describePlan(plan),
+    dials: plan.chunks.map((c) => ({
+      ussdCode: plan.ussdCodes[c.index - 1],
+      amount: c.amount,
+      label: `Sambaza ${c.index}/${c.total} · KES ${c.amount}`,
+    })),
+  };
+}
+
+// ---- Back-compat helpers used by older call sites ----
 
 export type Offer = {
   amount: number;
   ussdTemplate: string;
   menuInputs: string[];
   label: string;
-  simSlot: number;
+  simSlot?: number;
 };
 
-/** Convert DataPlan list into Offer list for the poller */
-export const OFFERS: Offer[] = DATA_PLANS.map((p) => ({
-  amount: p.price,
-  ussdTemplate: p.ussdTemplate,
-  menuInputs: p.followUpInputs,
-  label: p.name,
-  simSlot: p.simSlot,
-}));
-
+/** @deprecated Prefer planFulfillment — kept so old imports don't break */
 export function matchOffer(amount: number): Offer | null {
-  // Exact match first
-  const exact = OFFERS.find((o) => o.amount === amount);
-  if (exact) return exact;
-
-  // Tolerate floating point / cents (e.g. 48.00)
-  const rounded = Math.round(amount);
-  return OFFERS.find((o) => o.amount === rounded) ?? null;
+  if (!Number.isFinite(amount) || amount < 1) return null;
+  const chunk = Math.min(Math.round(amount), SAMBAZA_MAX_PER_TX);
+  return {
+    amount: chunk,
+    ussdTemplate: '*140*{phone}*{amount}#',
+    menuInputs: [],
+    label: `Sambaza KES ${chunk}`,
+  };
 }
 
+/** @deprecated Prefer planFulfillment */
 export function buildUssdCode(offer: Offer, phone: string): string {
-  const normalized = normalizePhone(phone);
-  return offer.ussdTemplate
-    .replace(/pn/gi, normalized)
-    .replace(/\{phone\}/gi, normalized)
-    .replace(/\{amount\}/gi, String(offer.amount));
+  const digits = phone.replace(/\D/g, '');
+  const p =
+    digits.startsWith('0') && digits.length === 10
+      ? '254' + digits.slice(1)
+      : digits;
+  return offer.ussdTemplate.replace('{phone}', p).replace('{amount}', String(offer.amount));
 }
 
-function normalizePhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  if (digits.startsWith('0') && digits.length === 10) return '254' + digits.slice(1);
-  if (digits.startsWith('254') && digits.length === 12) return digits;
-  if (digits.length === 9) return '254' + digits;
-  return digits;
-}
-
-export function planFromOffer(offer: Offer): DataPlan | undefined {
-  return DATA_PLANS.find((p) => p.price === offer.amount && p.name === offer.label);
-}
+export { SAMBAZA_MAX_PER_TX, buildSambazaPlan, splitIntoChunks } from './sambaza';
