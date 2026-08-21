@@ -1,41 +1,56 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * Webazi brand theme — light & dark
  */
 
 import { Platform } from 'react-native';
 
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
+const brandGreen = '#00A86B';
+const brandDark = '#0B1F17';
+const brandLight = '#F0FDF6';
+const accent = '#FFB020';
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
+    text: '#0B1F17',
+    textSecondary: '#5A6B63',
+    background: '#F7FAF8',
+    surface: '#FFFFFF',
+    surfaceAlt: '#E8F5EE',
+    tint: brandGreen,
+    accent,
+    icon: '#5A6B63',
+    tabIconDefault: '#8A9A92',
+    tabIconSelected: brandGreen,
+    success: '#00A86B',
+    warning: '#FFB020',
+    error: '#E5484D',
+    border: '#D8E5DE',
+    muted: '#9AABA3',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
+    text: '#E8F5EE',
+    textSecondary: '#9AABA3',
+    background: brandDark,
+    surface: '#12261D',
+    surfaceAlt: '#1A3228',
+    tint: '#2DD4A0',
+    accent,
+    icon: '#9AABA3',
+    tabIconDefault: '#6B7C74',
+    tabIconSelected: '#2DD4A0',
+    success: '#2DD4A0',
+    warning: '#FFB020',
+    error: '#FF6B6B',
+    border: '#1F3A2E',
+    muted: '#6B7C74',
   },
 };
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
     serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
