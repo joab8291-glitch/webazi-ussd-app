@@ -6,9 +6,10 @@
  *   70,000 → 7 × 10,000
  *   25,500 → 2 × 10,000 + 1 × 5,500
  *
- * USSD pattern (verify on live Safaricom before production):
- *   *140*{recipientPhone}*{amount}#
- * Phone must be 2547XXXXXXXX / 2541XXXXXXXX (no leading 0).
+ * Official USSD pattern:
+ *   *140*{amount}*{MSISDN}#
+ * Example: *140*10000*254712345678#
+ * MSISDN must be 2547XXXXXXXX / 2541XXXXXXXX (no leading 0).
  */
 
 /** Safaricom hard limit per Sambaza transfer */
@@ -68,10 +69,9 @@ export function normalizePhone(raw: string): string | null {
   return null;
 }
 
-/** Build a single Sambaza USSD string */
+/** Build a single Sambaza USSD string: *140*{amount}*{MSISDN}# */
 export function buildSambazaUssd(phone254: string, amount: number): string {
-  // *140*2547XXXXXXXX*10000#
-  return `*140*${phone254}*${amount}#`;
+  return `*140*${amount}*${phone254}#`;
 }
 
 /**

@@ -2,7 +2,7 @@
  * Fulfillment planner.
  *
  * Primary product: Safaricom Sambaza airtime (any amount, chunked at KES 10,000).
- * Optional: exact-match DATA_PLANS (Bingwa / Tunukiwa) if you enable that mode.
+ * USSD: *140*{amount}*{MSISDN}#
  */
 
 import {
@@ -29,9 +29,9 @@ export type FulfillmentJob = {
  * Turn a paid transaction (phone + amount) into one or more USSD dials.
  *
  * Examples:
- *   amount 500   → 1 dial  *140*2547…*500#
- *   amount 10000 → 1 dial  *140*2547…*10000#
- *   amount 70000 → 7 dials *140*2547…*10000#  (×7)
+ *   amount 500   → 1 dial  *140*500*2547…#
+ *   amount 10000 → 1 dial  *140*10000*2547…#
+ *   amount 70000 → 7 dials *140*10000*2547…#  (×7)
  *   amount 25500 → 3 dials 10000 + 10000 + 5500
  */
 export function planFulfillment(phone: string, amount: number): FulfillmentJob | null {
@@ -66,7 +66,7 @@ export function matchOffer(amount: number): Offer | null {
   const chunk = Math.min(Math.round(amount), SAMBAZA_MAX_PER_TX);
   return {
     amount: chunk,
-    ussdTemplate: '*140*{phone}*{amount}#',
+    ussdTemplate: '*140*{amount}*{phone}#',
     menuInputs: [],
     label: `Sambaza KES ${chunk}`,
   };
@@ -79,7 +79,9 @@ export function buildUssdCode(offer: Offer, phone: string): string {
     digits.startsWith('0') && digits.length === 10
       ? '254' + digits.slice(1)
       : digits;
-  return offer.ussdTemplate.replace('{phone}', p).replace('{amount}', String(offer.amount));
+  return offer.ussdTemplate
+    .replace('{phone}', p)
+    .replace('{amount}', String(offer.amount));
 }
 
 export { SAMBAZA_MAX_PER_TX, buildSambazaPlan, splitIntoChunks } from './sambaza';
