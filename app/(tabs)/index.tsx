@@ -1,175 +1,300 @@
-import { useState, useEffect } from 'react';
-import { View, Text, Button, ScrollView, StyleSheet, PermissionsAndroid, Platform, TextInput } from 'react-native';
-import type { EventSubscription } from 'expo-modules-core';
-import SmsListener from '../../modules/sms-listener/src/SmsListenerModule';
-import type { SmsReceivedPayload, SimSlotInfo } from '../../modules/sms-listener/src/SmsListener.types';
-import UssdExecutor from '../../modules/ussd-executor/src/UssdExecutorModule';
-import { processIncomingSms } from '../../modules/offer-matcher/matcher';
-import { DataPlan } from '../../modules/offer-matcher/types';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  RefreshControl,
+  Switch,
+  Platform,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors } from '@/constants/theme';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSimStore } from '@/store/useSimStore';
+import { useActivityStore } from '@/store/useActivityStore';
+import { useTransactionStore } from '@/store/useTransactionStore';
+import {
+  startSmsListening,
+  stopSmsListening,
+  refreshSimSlots,
+  requestSmsPermissions,
+  requestCallPermission,
+} from '@/services/smsAutomation';
+import { startPolling, stopPolling, isPolling } from '@/services/poller';
+import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
+import { healthCheck } from '@/services/api';
 
-const requestSmsPermissions = async () => {
-  if (Platform.OS !== 'android') return true;
+export default function HomeScreen() {
+  const scheme = useColorScheme() ?? 'light';
+  const c = Colors[scheme];
+  const insets = useSafeAreaInsets();
 
-  const granted = await PermissionsAndroid.requestMultiple([
-    PermissionsAndroid.PERMISSIONS.READ_SMS,
-    PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
-    PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
-  ]);
+  const { smsListening, tillSubscriptionId, availableSims } = useSimStore();
+  const logs = useActivityStore((s) => s.logs);
+  const clearLogs = useActivityStore((s) => s.clear);
+  const { transactions, refresh } = useTransactionStore();
 
-  return Object.values(granted).every(
-    (status) => status === PermissionsAndroid.RESULTS.GRANTED
-  );
-};
+  const [pollOn, setPollOn] = useState(false);
+  const [backendOk, setBackendOk] = useState<boolean | null>(null);
+  const [a11yOk, setA11yOk] = useState<boolean | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-const requestCallPermission = async () => {
-  if (Platform.OS !== 'android') return true;
+  const pendingCount = transactions.filter((t) => t.status === 'pending').length;
+  const completedCount = transactions.filter((t) => t.status === 'completed').length;
+  const failedCount = transactions.filter((t) => t.status === 'failed').length;
 
-  const granted = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.CALL_PHONE,
-    {
-      title: 'Phone Call Permission',
-      message: 'This app needs permission to dial USSD codes.',
-      buttonPositive: 'Allow',
-      buttonNegative: 'Deny',
+  const bootstrap = useCallback(async () => {
+    refreshSimSlots();
+    try {
+      setA11yOk(UssdExecutor.isAccessibilityEnabled());
+    } catch {
+      setA11yOk(false);
     }
-  );
-
-  return granted === PermissionsAndroid.RESULTS.GRANTED;
-};
-
-export default function TestScreen() {
-  const [simSlots, setSimSlots] = useState<SimSlotInfo[] | null>(null);
-  const [listening, setListening] = useState(false);
-  const [messages, setMessages] = useState<SmsReceivedPayload[]>([]);
-  const [error, setError] = useState<string | null>(null)
-const [helloResult, setHelloResult] = useState<string | null>(null);
-
-const [ussdCode, setUssdCode] = useState('*334#');
-const [ussdResult, setUssdResult] = useState<string | null>(null);
-const [ussdLoading, setUssdLoading] = useState(false);
-
-const [matchLog, setMatchLog] = useState<string[]>([]);
+    try {
+      await healthCheck();
+      setBackendOk(true);
+    } catch {
+      setBackendOk(false);
+    }
+    await refresh();
+  }, [refresh]);
 
   useEffect(() => {
-  const subscription: EventSubscription = SmsListener.addListener(
-  'onSmsReceived',
-  (event: SmsReceivedPayload) => {
-    setMessages((prev) => [event, ...prev]);
-    const match = processIncomingSms(event.body);
+    bootstrap();
+  }, [bootstrap]);
 
-    if (match.status === 'matched') {
-      setMatchLog((prev) => [
-        `✅ ${match.plan.name} for ${match.payment.phone} — dialing ${match.resolvedUssd}`,
-        ...prev,
-      ]);
-      autoDial(match.plan, match.resolvedUssd);
-    } else if (match.status === 'missing_phone') {
-      setMatchLog((prev) => [
-        `⚠️ Matched "${match.plan.name}" but couldn't extract phone number from SMS`,
-        ...prev,
-      ]);
-    } else if (match.status === 'no_match') {
-      setMatchLog((prev) => [
-        `⚠️ Payment of KES ${match.payment.amount} — no matching plan`,
-        ...prev,
-      ]);
-    }
-  }
-);
-     
-  return () => subscription.remove();
-}, []);
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await bootstrap();
+    setRefreshing(false);
+  };
 
-const autoDial = async (plan: DataPlan, resolvedUssd: string) => {
-  try {
-    const ok = await requestCallPermission();
-    if (!ok) {
-      setMatchLog((prev) => [`❌ CALL_PHONE denied — cannot auto-dial ${plan.name}`, ...prev]);
-      return;
+  const toggleSms = async () => {
+    if (smsListening) {
+      stopSmsListening();
+    } else {
+      await startSmsListening();
     }
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Auto-dial timed out after 15s')), 15000)
-    );
-    const result = await Promise.race([
-      UssdExecutor.startUssd(resolvedUssd, plan.followUpInputs, plan.simSlot),
-      timeout,
-    ]);
-    setMatchLog((prev) => [`📞 ${plan.name} result: ${result}`, ...prev]);
-  } catch (e: any) {
-    setMatchLog((prev) => [`❌ Auto-dial failed for ${plan.name}: ${String(e?.message ?? e)}`, ...prev]);
-  }
-};
+  };
+
+  const togglePoll = () => {
+    if (pollOn || isPolling()) {
+      stopPolling();
+      setPollOn(false);
+    } else {
+      startPolling(8000);
+      setPollOn(true);
+    }
+  };
+
+  const ensurePermissions = async () => {
+    await requestSmsPermissions();
+    await requestCallPermission();
+    try {
+      if (!UssdExecutor.isAccessibilityEnabled()) {
+        UssdExecutor.openAccessibilitySettings();
+      }
+      setA11yOk(UssdExecutor.isAccessibilityEnabled());
+    } catch {
+      // module may not be available on web/simulator
+    }
+    refreshSimSlots();
+  };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Webazi USSD App — Native Module Test</Text>
+    <ScrollView
+      style={{ flex: 1, backgroundColor: c.background }}
+      contentContainerStyle={[
+        styles.container,
+        { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
+      ]}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
+      <Text style={[styles.brand, { color: c.tint }]}>Webazi</Text>
+      <Text style={[styles.subtitle, { color: c.textSecondary }]}>
+        USSD data delivery · auto-fulfillment
+      </Text>
 
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>SMS Listener</Text>
-        <Button title="Get SIM Slots" onPress={handleGetSimSlots} />
-        <Text style={styles.mono}>
-          {simSlots ? JSON.stringify(simSlots, null, 2) : 'Not fetched yet'}
+      {/* Status row */}
+      <View style={styles.statusRow}>
+        <StatusChip label="Backend" ok={backendOk} colors={c} />
+        <StatusChip label="Accessibility" ok={a11yOk} colors={c} />
+        <StatusChip label="SMS" ok={smsListening} colors={c} />
+      </View>
+
+      {/* Stats */}
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text>
+        <View style={styles.statsRow}>
+          <Stat label="Pending" value={pendingCount} color={c.warning} />
+          <Stat label="Done" value={completedCount} color={c.success} />
+          <Stat label="Failed" value={failedCount} color={c.error} />
+        </View>
+      </View>
+
+      {/* Controls */}
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <Text style={[styles.cardTitle, { color: c.text }]}>Automation</Text>
+
+        <Row
+          label="SMS auto-dial"
+          hint="Listen for M-Pesa SMS and fulfill instantly"
+          value={smsListening}
+          onToggle={toggleSms}
+          colors={c}
+        />
+        <Row
+          label="Backend poller"
+          hint="Pull pending STK transactions every 8s"
+          value={pollOn}
+          onToggle={togglePoll}
+          colors={c}
+        />
+
+        <Pressable
+          onPress={ensurePermissions}
+          style={[styles.primaryBtn, { backgroundColor: c.tint }]}>
+          <Text style={styles.primaryBtnText}>Grant permissions &amp; refresh SIMs</Text>
+        </Pressable>
+
+        {availableSims.length > 0 && (
+          <Text style={[styles.hint, { color: c.textSecondary }]}>
+            SIMs: {availableSims.map((s) => s.carrierName || `slot ${s.slotIndex}`).join(', ')}{'\n'}
+            Till SIM: {tillSubscriptionId != null ? `sub ${tillSubscriptionId}` : 'not set — open Settings'}
+          </Text>
+        )}
+      </View>
+
+      {/* Activity log */}
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+        <View style={styles.logHeader}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Activity</Text>
+          <Pressable onPress={clearLogs}>
+            <Text style={{ color: c.tint, fontSize: 13 }}>Clear</Text>
+          </Pressable>
+        </View>
+        {logs.length === 0 ? (
+          <Text style={[styles.hint, { color: c.muted }]}>No activity yet</Text>
+        ) : (
+          logs.slice(0, 30).map((entry) => (
+            <Text
+              key={entry.id}
+              style={[
+                styles.logLine,
+                {
+                  color:
+                    entry.level === 'error'
+                      ? c.error
+                      : entry.level === 'warn'
+                        ? c.warning
+                        : entry.level === 'success'
+                          ? c.success
+                          : c.textSecondary,
+                },
+              ]}>
+              {new Date(entry.timestamp).toLocaleTimeString()} · {entry.message}
+            </Text>
+          ))
+        )}
+      </View>
+
+      {Platform.OS !== 'android' && (
+        <Text style={[styles.hint, { color: c.warning, marginTop: 8 }]}>
+          Native USSD / SMS modules require an Android device or emulator with a development build.
         </Text>
-        <Button
-          title={listening ? 'Stop Listening' : 'Start Listening'}
-          onPress={listening ? handleStopListening : handleStartListening}
-        />
-        <Text>{listening ? '✅ SMS listener active' : '⏸ Not listening'}</Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>USSD Executor (stub)</Text>
-        <Button title="Call hello()" onPress={handleTestUssdModule} />
-        <Text style={styles.mono}>{helloResult ?? 'Not called yet'}</Text>
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>USSD Executor — Live Dial</Text>
-        <TextInput
-          value={ussdCode}
-          onChangeText={setUssdCode}
-          placeholder="*334#"
-          style={{ borderWidth: 1, borderColor: '#ccc', padding: 8, borderRadius: 6 }}
-        />
-        <Button
-          title={ussdLoading ? 'Dialing...' : 'Start USSD'}
-          onPress={handleStartUssd}
-          disabled={ussdLoading}
-        />
-        <Text style={styles.mono}>{ussdResult ?? 'No result yet'}</Text>
-      </View>
-
-      {error && <Text style={styles.error}>Error: {error}</Text>}
-
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>Received SMS ({messages.length})</Text>
-        {messages.map((m, i) => (
-          <Text key={i} style={styles.mono}>{JSON.stringify(m)}</Text>
-        ))}
-      </View>
-<View style={styles.section}>
-        <Text style={styles.subtitle}>Received SMS ({messages.length})</Text>
-        {messages.map((m, i) => (
-          <Text key={i} style={styles.mono}>{JSON.stringify(m)}</Text>
-        ))}
-      </View>
-
-      <View style={styles.section}>
-        <Text style={styles.subtitle}>Offer Matcher Log</Text>
-        {matchLog.length === 0 && <Text style={styles.mono}>No matches yet</Text>}
-        {matchLog.map((line, i) => (
-          <Text key={i} style={styles.mono}>{line}</Text>
-        ))}
-      </View>
+      )}
     </ScrollView>
   );
 }
 
+function StatusChip({
+  label,
+  ok,
+  colors,
+}: {
+  label: string;
+  ok: boolean | null;
+  colors: (typeof Colors)['light'];
+}) {
+  const bg =
+    ok === null ? colors.surfaceAlt : ok ? colors.surfaceAlt : '#FEECEC';
+  const fg = ok === null ? colors.muted : ok ? colors.success : colors.error;
+  return (
+    <View style={[styles.chip, { backgroundColor: bg }]}>
+      <View style={[styles.dot, { backgroundColor: fg }]} />
+      <Text style={{ color: fg, fontSize: 12, fontWeight: '600' }}>{label}</Text>
+    </View>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <View style={{ alignItems: 'center', flex: 1 }}>
+      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{value}</Text>
+      <Text style={{ fontSize: 12, color: '#687076' }}>{label}</Text>
+    </View>
+  );
+}
+
+function Row({
+  label,
+  hint,
+  value,
+  onToggle,
+  colors,
+}: {
+  label: string;
+  hint: string;
+  value: boolean;
+  onToggle: () => void;
+  colors: (typeof Colors)['light'];
+}) {
+  return (
+    <View style={styles.row}>
+      <View style={{ flex: 1 }}>
+        <Text style={{ color: colors.text, fontWeight: '600' }}>{label}</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{hint}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onToggle}
+        trackColor={{ true: colors.tint, false: colors.border }}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  container: { padding: 20, gap: 16 },
-  title: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
-  subtitle: { fontSize: 15, fontWeight: '600', marginBottom: 6 },
-  section: { gap: 8, marginBottom: 16 },
-  mono: { fontFamily: 'monospace', fontSize: 12, color: '#333' },
-  error: { color: 'red', marginBottom: 12 },
+  container: { paddingHorizontal: 16, gap: 14 },
+  brand: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  subtitle: { fontSize: 14, marginBottom: 4 },
+  statusRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  card: {
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 16,
+    gap: 12,
+  },
+  cardTitle: { fontSize: 16, fontWeight: '700' },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-around' },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  primaryBtn: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  primaryBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  hint: { fontSize: 12, lineHeight: 18 },
+  logHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  logLine: { fontSize: 11, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', lineHeight: 16 },
 });
