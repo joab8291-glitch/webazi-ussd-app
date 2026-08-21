@@ -18,7 +18,7 @@ import { openWhatsAppChat } from '@/services/whatsapp';
 
 type Filter = 'all' | 'pending' | 'completed' | 'failed';
 
- const FILTERS: Filter[] = ['all', 'pending', 'completed', 'failed'];
+const FILTERS: Filter[] = ['all', 'pending', 'completed', 'failed'];
 
 export default function TransactionsScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -85,13 +85,7 @@ export default function TransactionsScreen() {
             </Text>
           )
         }
-        renderItem={({ item }) => (
-          <TxnCard
-            txn={item}
-            colors={c}
-            onRefresh={load}
-          />
-        )}
+        renderItem={({ item }) => <TxnCard txn={item} colors={c} onRefresh={load} />}
       />
     </View>
   );
