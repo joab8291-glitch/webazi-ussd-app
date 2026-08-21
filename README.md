@@ -12,6 +12,38 @@ Android (Expo) companion app that **auto-fulfills data / airtime orders** by:
 
 ---
 
+## Brand assets
+
+Located in [`assets/brand/`](./assets/brand/):
+
+| File | Use |
+|------|-----|
+| `icon.svg` | App icon mark (signal arcs on green) |
+| `logo.svg` / `logo-white.svg` | Wordmark for light / dark backgrounds |
+| `og-image.svg` | Open Graph / social preview (1200×630) |
+
+**Colors:** brand `#00A86B` · dark `#0B1F17` · accent `#2DD4A0`
+
+Generate PNG exports (app icon, splash, favicon, adaptive icons, OG):
+
+```bash
+pip install Pillow
+python scripts/generate-brand-pngs.py
+```
+
+### OG / social meta (web)
+
+```html
+<meta property="og:image" content="https://raw.githubusercontent.com/joab8291-glitch/webazi-ussd-app/master/assets/brand/og-image.svg" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta name="twitter:card" content="summary_large_image" />
+```
+
+(After running the PNG generator, prefer `assets/images/og-image.png` for wider platform support.)
+
+---
+
 ## Architecture
 
 ```
@@ -55,7 +87,8 @@ Android (Expo) companion app that **auto-fulfills data / airtime orders** by:
 
 ```bash
 npm install
-npx expo prebuild   # if you need native projects
+python scripts/generate-brand-pngs.py   # optional: refresh PNG icons/OG
+npx expo prebuild
 npx expo run:android
 ```
 
