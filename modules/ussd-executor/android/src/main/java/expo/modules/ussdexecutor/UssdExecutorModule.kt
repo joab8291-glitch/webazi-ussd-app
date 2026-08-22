@@ -92,24 +92,39 @@ class UssdExecutorModule : Module() {
 
       intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
 
-      // Target the specific SIM slot if the phone/telecom account supports it
-      val accountHandles = telecomManager.callCapablePhoneAccounts
+      // Target the specific SIM subscription if the phone/telecom account supports it
+val accountHandles = telecomManager.callCapablePhoneAccounts
 
-      val targetHandle = accountHandles?.find { handle ->
-        val account = telecomManager.getPhoneAccount(handle)
+val targetHandle = accountHandles?.find { handle ->
+  try {
+    val account = telecomManager.getPhoneAccount(handle)
 
-        account?.extras?.getInt(
-          "subscription_id",
-          -1
-        ) == subscriptionId
-      }
+    val accountSubscriptionId =
+      account?.extras?.getInt("subscription_id", -1) ?: -1
 
-      if (targetHandle != null) {
-        intent.putExtra(
-          TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE,
-          targetHandle
-        )
-      }
+    accountSubscriptionId == subscriptionId
+  } catch (e: SecurityException) {
+    false
+  } catch (e: Exception) {
+    false
+  }
+}
+
+if (targetHandle != null) {
+  intent.putExtra(
+    TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE,
+    targetHandle
+  )
+} else {
+  sendEvent(
+    "onUssdResult",
+    mapOf(
+      "result" to "No phone account found for subscription ID: $subscriptionId",
+      "success" to false
+    )
+  )
+  return@Function
+}
 
       context.startActivity(intent)
 
