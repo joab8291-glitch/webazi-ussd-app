@@ -22,14 +22,15 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "READ_SMS",
-        "RECEIVE_SMS",
-        "READ_PHONE_STATE",
-        "CALL_PHONE",
-        "FOREGROUND_SERVICE",
-        "BIND_ACCESSIBILITY_SERVICE",
-        "SYSTEM_ALERT_WINDOW"
-      ]
+  "READ_SMS",
+  "RECEIVE_SMS",
+  "READ_PHONE_STATE",
+  "READ_PHONE_NUMBERS",
+  "CALL_PHONE",
+  "FOREGROUND_SERVICE",
+  "BIND_ACCESSIBILITY_SERVICE",
+  "SYSTEM_ALERT_WINDOW"
+]
     },
     "web": {
       "output": "static",
