@@ -44,37 +44,94 @@ class UssdExecutorModule : Module() {
 
     // Dials a USSD code on the given SIM slot, queues follow-up menu inputs, and reports the result
     Function("dialUssd") { ussdCode: String, subscriptionId: Int, menuInputs: List<String> ->
-      val context = appContext.reactContext
+  val context = appContext.reactContext
 
-      if (context != null) {
-        UssdAccessibilityService.pendingInputs = menuInputs.toMutableList()
-        UssdAccessibilityService.onResult = { resultText ->
-          sendEvent("onUssdResult", mapOf("result" to resultText, "success" to true))
-        }
+  if (context != null) {
 
-        try {
-          val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-          val uri = Uri.fromParts("tel", Uri.encode(ussdCode), null)
-          val intent = Intent(Intent.ACTION_CALL, uri)
-          intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    // Check CALL_PHONE permission before attempting ACTION_CALL
+    if (
+      context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) !=
+      android.content.pm.PackageManager.PERMISSION_GRANTED
+    ) {
+      sendEvent(
+        "onUssdResult",
+        mapOf(
+          "result" to "CALL_PHONE permission is not granted",
+          "success" to false
+        )
+      )
+      return@Function
+    }
 
-          // Target the specific SIM slot if the phone/telecom account supports it
-          val accountHandles = telecomManager.callCapablePhoneAccounts
-          val targetHandle = accountHandles?.find { handle ->
-            val account = telecomManager.getPhoneAccount(handle)
-            account?.extras?.getInt("subscription_id", -1) == subscriptionId
-          }
-          if (targetHandle != null) {
-            intent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, targetHandle)
-          }
+    UssdAccessibilityService.pendingInputs = menuInputs.toMutableList()
 
-          context.startActivity(intent)
-        } catch (e: SecurityException) {
-          sendEvent("onUssdResult", mapOf("result" to "Missing CALL_PHONE permission", "success" to false))
-        } catch (e: Exception) {
-          sendEvent("onUssdResult", mapOf("result" to (e.message ?: "Unknown error"), "success" to false))
-        }
+    UssdAccessibilityService.onResult = { resultText ->
+      sendEvent(
+        "onUssdResult",
+        mapOf(
+          "result" to resultText,
+          "success" to true
+        )
+      )
+    }
+
+    try {
+      val telecomManager =
+        context.getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+
+      val uri = Uri.fromParts(
+        "tel",
+        Uri.encode(ussdCode),
+        null
+      )
+
+      val intent = Intent(
+        Intent.ACTION_CALL,
+        uri
+      )
+
+      intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+
+      // Target the specific SIM slot if the phone/telecom account supports it
+      val accountHandles = telecomManager.callCapablePhoneAccounts
+
+      val targetHandle = accountHandles?.find { handle ->
+        val account = telecomManager.getPhoneAccount(handle)
+
+        account?.extras?.getInt(
+          "subscription_id",
+          -1
+        ) == subscriptionId
       }
+
+      if (targetHandle != null) {
+        intent.putExtra(
+          TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE,
+          targetHandle
+        )
+      }
+
+      context.startActivity(intent)
+
+    } catch (e: SecurityException) {
+
+      sendEvent(
+        "onUssdResult",
+        mapOf(
+          "result" to "CALL_PHONE permission was denied by Android",
+          "success" to false
+        )
+      )
+
+    } catch (e: Exception) {
+
+      sendEvent(
+        "onUssdResult",
+        mapOf(
+          "result" to (e.message ?: "Unknown error"),
+          "success" to false
+        )
+      )
     }
   }
 }
