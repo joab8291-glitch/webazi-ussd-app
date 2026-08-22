@@ -1,5 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-  <application>
+
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+
+    <application>
     <service
         android:name=".UssdAccessibilityService"
         android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
