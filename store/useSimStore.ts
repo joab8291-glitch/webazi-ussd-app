@@ -60,9 +60,8 @@ export const useSimStore = create<State>()(
       },
 
       partialize: (state) => ({
+        ...state,
         tillSubscriptionId: state.tillSubscriptionId,
-        availableSims: state.availableSims,
-        smsListening: state.smsListening,
       }),
     }
   )
