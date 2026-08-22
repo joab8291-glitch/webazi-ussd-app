@@ -4,7 +4,7 @@ export type DataPlan = {
   price: number;             // exact KES amount that triggers this plan
   ussdTemplate: string;      // contains "pn" token, replaced with payer's phone number
   followUpInputs: string[];  // extra menu responses after dialing, if any
-  simslot: number;           // subscriptionId to dial from (-1 = default SIM)
+  simSlot: number;           // subscriptionId to dial from (-1 = default SIM)
   category: string;
 };
 
