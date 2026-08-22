@@ -23,6 +23,7 @@ export async function requestSmsPermissions(): Promise<boolean> {
     PermissionsAndroid.PERMISSIONS.READ_SMS,
     PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
     PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
+    PermissionsAndroid.PERMISSIONS.READ_PHONE_NUMBERS,
   ]);
   return Object.values(granted).every((s) => s === PermissionsAndroid.RESULTS.GRANTED);
 }
