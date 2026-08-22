@@ -129,8 +129,12 @@ async function autoDial(plan: DataPlan, resolvedUssd: string, customerPhone?: st
       return;
     }
 
-    const subId =
-      useSimStore.getState().tillSubscriptionId ?? plan.simSlot ?? -1;
+    const subId = useSimStore.getState().tillSubscriptionId;
+
+if (subId == null || subId < 0) {
+  log('error', 'No Till SIM selected. Please select the SIM used for USSD delivery.');
+  return;
+}
 
     const outcome = await dialWithTimeout(resolvedUssd, subId, plan.followUpInputs, 30000);
 
@@ -208,6 +212,11 @@ export async function manualDial(ussdCode: string, menuInputs: string[] = []) {
     UssdExecutor.openAccessibilitySettings();
     throw new Error('Accessibility service not enabled');
   }
-  const subId = useSimStore.getState().tillSubscriptionId ?? -1;
-  return dialWithTimeout(ussdCode, subId, menuInputs, 30000);
+  const subId = useSimStore.getState().tillSubscriptionId;
+
+if (subId == null || subId < 0) {
+  throw new Error('No SIM selected for USSD dialing');
+}
+
+return dialWithTimeout(ussdCode, subId, menuInputs, 30000);
 }
