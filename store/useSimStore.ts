@@ -26,33 +26,41 @@ export const useSimStore = create<State>()(
       availableSims: [],
       smsListening: false,
 
-      setTillSim: (id) => set({
-        tillSubscriptionId: id,
-      }),
+      setTillSim: (id) =>
+        set({
+          tillSubscriptionId: id,
+        }),
 
-      setAvailableSims: (sims) => set({
-        availableSims: sims,
-      }),
+      setAvailableSims: (sims) =>
+        set({
+          availableSims: sims,
+        }),
 
-      setSmsListening: (v) => set({
-        smsListening: v,
-      }),
+      setSmsListening: (v) =>
+        set({
+          smsListening: v,
+        }),
     }),
     {
       name: 'webazi-sim-store',
+
       storage: {
         getItem: async (name) => {
           const value = await AsyncStorage.getItem(name);
           return value ? JSON.parse(value) : null;
         },
+
         setItem: async (name, value) => {
           await AsyncStorage.setItem(name, JSON.stringify(value));
         },
+
         removeItem: async (name) => {
           await AsyncStorage.removeItem(name);
         },
       },
+
       partialize: (state) => ({
+        ...state,
         tillSubscriptionId: state.tillSubscriptionId,
       }),
     }
