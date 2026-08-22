@@ -87,27 +87,62 @@ export function stopSmsListening() {
 
 function handleSms(event: SmsReceivedPayload) {
   const log = useActivityStore.getState().addLog;
-  log('info', `SMS from ${event.sender}: ${event.body.slice(0, 80)}…`);
+
+  const selectedSubscriptionId =
+    useSimStore.getState().tillSubscriptionId;
+
+  log(
+    'info',
+    `SMS from ${event.sender} on subscription ${event.subscriptionId}: ${event.body.slice(0, 80)}…`
+  );
+
+  if (selectedSubscriptionId == null) {
+    log(
+      'warn',
+      'SMS received but no Till SIM is selected. Open Settings and select the Till SIM.'
+    );
+    return;
+  }
+
+  if (event.subscriptionId !== selectedSubscriptionId) {
+    log(
+      'info',
+      `Ignoring SMS from subscription ${event.subscriptionId}; Till SIM is subscription ${selectedSubscriptionId}`
+    );
+    return;
+  }
 
   const match = processIncomingSms(event.body);
 
   if (match.status === 'not_a_payment') return;
 
   if (match.status === 'no_match') {
-    log('warn', `Payment KES ${match.payment.amount} — no matching plan`);
+    log(
+      'warn',
+      `Payment KES ${match.payment.amount} — no matching plan`
+    );
     return;
   }
 
   if (match.status === 'missing_phone') {
-    log('warn', `Matched "${match.plan.name}" but no phone in SMS`);
+    log(
+      'warn',
+      `Matched "${match.plan.name}" but no phone in SMS`
+    );
     return;
   }
 
-  // matched
-  log('success', `Matched ${match.plan.name} → ${match.resolvedUssd}`);
-  autoDial(match.plan, match.resolvedUssd, match.payment.phone ?? undefined);
-}
+  log(
+    'success',
+    `Matched ${match.plan.name} → ${match.resolvedUssd} on Till subscription ${selectedSubscriptionId}`
+  );
 
+  autoDial(
+    match.plan,
+    match.resolvedUssd,
+    match.payment.phone ?? undefined
+  );
+}
 async function autoDial(plan: DataPlan, resolvedUssd: string, customerPhone?: string) {
   if (dialing) {
     useActivityStore.getState().addLog('warn', 'Dial already in progress — queued skip');
