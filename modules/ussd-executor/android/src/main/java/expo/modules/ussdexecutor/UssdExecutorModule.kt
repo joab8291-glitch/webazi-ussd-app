@@ -140,11 +140,11 @@ class UssdExecutorModule : Module() {
           return@Function
         }
 
-        val uri = Uri.fromParts(
-          "tel",
-          Uri.encode(ussdCode),
-          null
-        )
+        // FIX: Uri.fromParts() re-encodes its input internally, which double-encodes
+        // the already-encoded '#' (%23 -> %2523), corrupting the USSD code when the
+        // system dialer parses it (e.g. *334# becomes *33423). Uri.parse() takes the
+        // string literally, so a single Uri.encode() pass is correct here.
+        val uri = Uri.parse("tel:" + Uri.encode(ussdCode))
 
         val intent = Intent(
           Intent.ACTION_CALL,
