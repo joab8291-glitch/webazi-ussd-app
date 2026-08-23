@@ -12,8 +12,7 @@ import com.android.build.OutputFile
  * release mode, e.g. `cdebugBuildTypes`.
  */
 react {
-    entryFile = file("../../index.js")
-    entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", "--", project.dir, '--platform', 'android'].execute(cwd: rootDir).text.trim())
+    entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", "--", rootDir, "--platform", "android"].execute(null, rootDir).text.trim())
     codegenDir = file("../../node_modules/react-native-codegen")
 }
 
