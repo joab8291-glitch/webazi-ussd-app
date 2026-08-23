@@ -1,0 +1,111 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+apply plugin: 'kotlin-kapt'
+apply plugin: 'com.facebook.react'
+
+import com.android.build.OutputFile
+
+/**
+ * This is the configuration block to customize your React Native Android app.
+ * By default, the signs in release mode with your release key, but you can
+ * define the signing properties if you want to sign with your debug key in
+ * release mode, e.g. `cdebugBuildTypes`.
+ */
+react {
+    entryFile = file("../../index.js")
+    entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", "--", project.dir, '--platform', 'android'].execute(cwd: rootDir).text.trim())
+    codegenDir = file("../../node_modules/react-native-codegen")
+}
+
+/**
+ * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ */
+def enableProguardInReleaseBuilds = true
+
+/**
+ * The preferred build flavor of JavaScriptCore.
+ *
+ * For example, to use the international variant, you can use:
+ * `def jscFlavor = 'org.webkit:android-jsc-intl:+'`
+ *
+ * The international variant includes ICU i18n APIs and other
+ * internationalization data at the cost of increased binary size.
+ */
+def jscFlavor = 'org.webkit:android-jsc:+'
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+
+    compileSdkVersion rootProject.ext.compileSdkVersion
+
+    namespace "com.webazi.ussdapp"
+
+    defaultConfig {
+        applicationId "com.webazi.ussdapp"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode rootProject.ext.versionCode
+        versionName rootProject.ext.versionName
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+        release {
+            if (project.hasProperty('MYAPP_RELEASE_STORE_FILE')) {
+                storeFile file(MYAPP_RELEASE_STORE_FILE)
+                storePassword MYAPP_RELEASE_STORE_PASSWORD
+                keyAlias MYAPP_RELEASE_KEY_ALIAS
+                keyPassword MYAPP_RELEASE_KEY_PASSWORD
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+        }
+        release {
+            // Caution! In production, you need to generate your own signing key via $ keytool.
+            // see https://reactnative.dev/docs/signed-apk-android.
+            signingConfig signingConfigs.release
+            minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources enableProguardInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            
+            // Enable optimization
+            debuggable false
+        }
+    }
+
+    // applicationVariants are e.g. debug, release
+    applicationVariants.all { variant ->
+        variant.outputs.each { output ->
+            // For each separate APK per architecture, set a unique version code as described here:
+            // https://developer.android.com/studio/build/configure-apk-splits.html
+            def versionOverride = rootProject.ext.versionCode
+            output.versionCode = versionOverride
+        }
+    }
+}
+
+dependencies {
+    // The version of react-native is set by the React Native Gradle Plugin
+    implementation "com.facebook.react:react-android"
+    implementation "com.facebook.react:hermes-android"
+
+    if (enableHermes) {
+        def hermesPath = "../../node_modules/hermes-engine/android/hermes-release.aar"
+        debugImplementation files(hermesPath)
+        releaseImplementation files(hermesPath)
+    } else {
+        implementation jscFlavor
+    }
+}
+
+preBuild.dependsOn "checkExpoDependencies"
