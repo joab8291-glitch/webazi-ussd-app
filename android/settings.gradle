@@ -5,7 +5,6 @@ pluginManagement {
       commandLine("node", "--print", "require.resolve('@react-native/gradle-plugin/package.json', { paths: [require.resolve('react-native/package.json')] })")
     }.standardOutput.asText.get().trim()
   ).getParentFile().absolutePath
-
   includeBuild(reactNativeGradlePlugin)
 
   def expoPluginsPath = new File(
@@ -15,7 +14,6 @@ pluginManagement {
     }.standardOutput.asText.get().trim(),
     "../android/expo-gradle-plugin"
   ).absolutePath
-
   includeBuild(expoPluginsPath)
 }
 
@@ -31,7 +29,6 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
     ex.autolinkLibrariesFromCommand(expoAutolinking.rnConfigCommand)
   }
 }
-
 expoAutolinking.useExpoModules()
 
 rootProject.name = 'Webazi'
