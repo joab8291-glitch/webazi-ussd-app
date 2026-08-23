@@ -72,18 +72,34 @@ class UssdAccessibilityService : AccessibilityService() {
       return
     }
 
-    val arguments = android.os.Bundle()
-    arguments.putCharSequence(
+    // Clear the field first
+    val clearArguments = android.os.Bundle()
+    clearArguments.putCharSequence(
+      AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+      ""
+    )
+    editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArguments)
+
+    // Use TYPE_TEXT action to inject text character by character (more reliable for special chars)
+    val typeArguments = android.os.Bundle()
+    typeArguments.putCharSequence(
       AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
       input
     )
-    editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+    
+    Log.d(TAG, "Setting text field to: '$input' (length=${input.length})")
+    editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, typeArguments)
+
+    // Wait a moment for the text to be set
+    Thread.sleep(100)
 
     val sendButton = findClickableButton(root)
     if (sendButton == null) {
       Log.w(TAG, "No send/OK button found")
+    } else {
+      Log.d(TAG, "Clicking send button")
+      sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
-    sendButton?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
   }
 
   private fun findEditableNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
