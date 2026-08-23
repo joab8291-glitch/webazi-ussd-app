@@ -48,3 +48,6 @@ app-example
 !/android/build.gradle
 !/android/gradle.properties
 !/android/settings.gradle
+
+# Expo CNG - generated native projects
+/android/
