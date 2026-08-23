@@ -38,6 +38,13 @@ yarn-error.*
 
 app-example
 
-# generated native folders
+# generated native folders (but NOT gradle wrapper)
 /ios
-/android
+/android/*
+!/android/gradle/
+!/android/gradlew
+!/android/gradlew.bat
+!/android/app/
+!/android/build.gradle
+!/android/gradle.properties
+!/android/settings.gradle
