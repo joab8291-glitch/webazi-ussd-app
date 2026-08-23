@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.os.Build
 
 class UssdAccessibilityService : AccessibilityService() {
 
@@ -73,50 +74,69 @@ class UssdAccessibilityService : AccessibilityService() {
     }
 
     try {
-      // Step 1: Clear the field first
-      Log.d(TAG, "Step 1: Clearing text field")
-      val clearArguments = android.os.Bundle()
-      clearArguments.putCharSequence(
+      // Strategy 2: Character-by-character typing (most reliable for special chars like #)
+      Log.d(TAG, "=== STRATEGY 2: Character-by-character typing ===")
+      
+      Log.d(TAG, "Step 1: Clearing field")
+      val clearArgs = android.os.Bundle()
+      clearArgs.putCharSequence(
         AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
         ""
       )
-      editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArguments)
-
-      // Step 2: Wait for field to clear (race condition fix)
-      Log.d(TAG, "Step 2: Waiting 50ms for field to clear")
+      editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs)
       Thread.sleep(50)
 
-      // Step 3: Set the new text
-      Log.d(TAG, "Step 3: Setting text field to: '$input' (length=${input.length})")
-      val typeArguments = android.os.Bundle()
-      typeArguments.putCharSequence(
-        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-        input
-      )
-      editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, typeArguments)
-
-      // Step 4: Wait longer for text to be processed (increased from 100ms to 150ms)
-      Log.d(TAG, "Step 4: Waiting 150ms for text to be processed")
-      Thread.sleep(150)
-
-      // Step 5: Verify text was actually set
-      val currentText = editField.text
-      Log.d(TAG, "Step 5: Verification - text field now contains: '$currentText'")
-      if (currentText.toString() != input) {
-        Log.w(TAG, "WARNING: Text mismatch! Expected: '$input', but got: '$currentText'")
+      Log.d(TAG, "Step 2: Typing each character individually: '$input' (length=${input.length})")
+      for ((index, char) in input.withIndex()) {
+        Log.d(TAG, "  [${index + 1}/${input.length}] Typing character: '$char'")
+        
+        val typeArgs = android.os.Bundle()
+        typeArgs.putCharSequence(
+          AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+          char.toString()
+        )
+        editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, typeArgs)
+        
+        // Wait between each character for UI to process (especially important for # and *)
+        Thread.sleep(30)
       }
 
-      // Step 6: Find and click send button
-      Log.d(TAG, "Step 6: Looking for send button")
+      Log.d(TAG, "Step 3: All characters typed, waiting for UI to settle")
+      Thread.sleep(100)
+
+      val currentText = editField.text.toString()
+      Log.d(TAG, "Step 4: Verification - field contains: '$currentText'")
+
+      if (currentText == input) {
+        Log.d(TAG, "✓ SUCCESS: Text matches perfectly! '$currentText' == '$input'")
+        clickSendButton(root)
+      } else {
+        Log.w(TAG, "✗ WARNING: Text mismatch! Expected '$input' but got '$currentText'")
+        Log.w(TAG, "Clicking send anyway - carrier will reject if code is invalid")
+        clickSendButton(root)
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "✗ ERROR in typeAndSend: ${e.message}", e)
+    }
+  }
+
+  /**
+   * Helper: Click the send button
+   */
+  private fun clickSendButton(root: AccessibilityNodeInfo) {
+    try {
+      Log.d(TAG, "Step 5: Finding send button")
       val sendButton = findClickableButton(root)
       if (sendButton == null) {
         Log.w(TAG, "ERROR: No send/OK button found")
       } else {
-        Log.d(TAG, "Step 7: Clicking send button")
+        Log.d(TAG, "Step 6: Clicking send button")
+        Thread.sleep(100)
         sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        Log.d(TAG, "✓ Send button clicked - USSD should execute now")
       }
     } catch (e: Exception) {
-      Log.e(TAG, "ERROR in typeAndSend: ${e.message}", e)
+      Log.e(TAG, "ERROR clicking send button: ${e.message}", e)
     }
   }
 
