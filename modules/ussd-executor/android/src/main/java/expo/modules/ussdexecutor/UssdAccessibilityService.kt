@@ -72,33 +72,51 @@ class UssdAccessibilityService : AccessibilityService() {
       return
     }
 
-    // Clear the field first
-    val clearArguments = android.os.Bundle()
-    clearArguments.putCharSequence(
-      AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-      ""
-    )
-    editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArguments)
+    try {
+      // Step 1: Clear the field first
+      Log.d(TAG, "Step 1: Clearing text field")
+      val clearArguments = android.os.Bundle()
+      clearArguments.putCharSequence(
+        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+        ""
+      )
+      editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArguments)
 
-    // Use TYPE_TEXT action to inject text character by character (more reliable for special chars)
-    val typeArguments = android.os.Bundle()
-    typeArguments.putCharSequence(
-      AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-      input
-    )
-    
-    Log.d(TAG, "Setting text field to: '$input' (length=${input.length})")
-    editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, typeArguments)
+      // Step 2: Wait for field to clear (race condition fix)
+      Log.d(TAG, "Step 2: Waiting 50ms for field to clear")
+      Thread.sleep(50)
 
-    // Wait a moment for the text to be set
-    Thread.sleep(100)
+      // Step 3: Set the new text
+      Log.d(TAG, "Step 3: Setting text field to: '$input' (length=${input.length})")
+      val typeArguments = android.os.Bundle()
+      typeArguments.putCharSequence(
+        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+        input
+      )
+      editField.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, typeArguments)
 
-    val sendButton = findClickableButton(root)
-    if (sendButton == null) {
-      Log.w(TAG, "No send/OK button found")
-    } else {
-      Log.d(TAG, "Clicking send button")
-      sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      // Step 4: Wait longer for text to be processed (increased from 100ms to 150ms)
+      Log.d(TAG, "Step 4: Waiting 150ms for text to be processed")
+      Thread.sleep(150)
+
+      // Step 5: Verify text was actually set
+      val currentText = editField.text
+      Log.d(TAG, "Step 5: Verification - text field now contains: '$currentText'")
+      if (currentText.toString() != input) {
+        Log.w(TAG, "WARNING: Text mismatch! Expected: '$input', but got: '$currentText'")
+      }
+
+      // Step 6: Find and click send button
+      Log.d(TAG, "Step 6: Looking for send button")
+      val sendButton = findClickableButton(root)
+      if (sendButton == null) {
+        Log.w(TAG, "ERROR: No send/OK button found")
+      } else {
+        Log.d(TAG, "Step 7: Clicking send button")
+        sendButton.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "ERROR in typeAndSend: ${e.message}", e)
     }
   }
 
