@@ -3,12 +3,17 @@
  *
  * Flow:
  *   1. GET pending payments from https://webazi-digital-solutions.onrender.com
- *   2. For each: plan Sambaza dials (split if amount > 10,000)
+ *   2. For each: plan Sambaza dials for the REMAINING amount only
+ *      (amount - delivered_amount), so a retry never re-sends airtime
+ *      that was already successfully delivered in a prior attempt.
  *   3. Dial each chunk from the till SIM via UssdExecutor
- *   4. Only mark complete when ALL chunks succeed; otherwise report fail
+ *   4. Report progress to the server after EVERY successful chunk —
+ *      not just at the end — so partial progress survives even if the
+ *      app crashes or the poll cycle is interrupted mid-transaction.
+ *   5. Only mark complete when the full original amount has been delivered.
  */
 
-import { fetchPending, reportComplete, reportFail } from './api';
+import { fetchPending, reportComplete, reportFail, reportProgress } from './api';
 import { planFulfillment } from './offerMatcher';
 import UssdExecutor from '../modules/ussd-executor/src/UssdExecutorModule';
 import { useSimStore } from '../store/useSimStore';
@@ -17,9 +22,7 @@ import { useActivityStore } from '../store/useActivityStore';
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let processing = false;
 
-/** Pause between successive Sambaza dials (ms) — avoid dialer contention */
 const DELAY_BETWEEN_DIALS_MS = 4000;
-/** Max wait for one USSD result */
 const USSD_TIMEOUT_MS = 45_000;
 
 export function startPolling(intervalMs: number = 8000) {
@@ -62,16 +65,33 @@ async function runPollCycle() {
     log('info', `Processing ${pending.length} pending payment(s)`);
 
     for (const txn of pending) {
-      const job = planFulfillment(txn.phone, txn.amount);
+      const alreadyDelivered = txn.delivered_amount ?? 0;
+      const remaining = txn.amount - alreadyDelivered;
+
+      // Safety net: if a previous cycle already delivered the full amount but
+      // the status update to "completed" never landed (e.g. app crash), fix it now
+      // instead of dialing again.
+      if (remaining <= 0) {
+        await reportComplete(txn.id).catch((e) =>
+          log('error', `reportComplete (already fulfilled) failed: ${String(e)}`)
+        );
+        log('success', `Txn #${txn.id} was already fully delivered — marked complete`);
+        continue;
+      }
+
+      const job = planFulfillment(txn.phone, remaining);
 
       if (!job) {
-        const reason = `Invalid phone or amount (phone=${txn.phone}, amount=${txn.amount})`;
+        const reason = `Invalid phone or amount (phone=${txn.phone}, remaining=${remaining})`;
         await reportFail(txn.id, reason).catch(() => {});
         log('error', reason);
         continue;
       }
 
-      log('info', `Txn #${txn.id}: ${job.summary}`);
+      log(
+        'info',
+        `Txn #${txn.id}: ${job.summary} (already delivered KES ${alreadyDelivered} of ${txn.amount})`
+      );
 
       if (!UssdExecutor.isAccessibilityEnabled()) {
         const reason = 'Accessibility service not enabled — cannot dial USSD';
@@ -80,10 +100,9 @@ async function runPollCycle() {
         continue;
       }
 
-      // Run every Sambaza chunk in order
       let allOk = true;
       let failReason = '';
-      let delivered = 0;
+      let cumulativeDelivered = alreadyDelivered;
 
       for (const dial of job.dials) {
         log('info', `Dialing ${dial.label} → ${dial.ussdCode}`);
@@ -91,21 +110,28 @@ async function runPollCycle() {
         const outcome = await dialWithTimeout(
           dial.ussdCode,
           tillSubId,
-          [], // Sambaza *140*phone*amount# is usually single-shot (no menu)
+          [],
           USSD_TIMEOUT_MS
         );
 
         if (outcome.success) {
-          delivered += dial.amount;
+          cumulativeDelivered += dial.amount;
+
+          // Persist progress immediately — this is the fix. Even if the app
+          // crashes right after this line, the server knows exactly how much
+          // was already sent, so a retry can never double-deliver.
+          await reportProgress(txn.id, cumulativeDelivered).catch((e) =>
+            log('error', `reportProgress failed: ${String(e)}`)
+          );
+
           log('success', `${dial.label} OK (${outcome.result || 'sent'})`);
         } else {
           allOk = false;
           failReason = `${dial.label} failed: ${outcome.result}`;
           log('error', failReason);
-          break; // stop remaining chunks for this txn
+          break;
         }
 
-        // Pause before next chunk of the same payment
         if (dial !== job.dials[job.dials.length - 1]) {
           await sleep(DELAY_BETWEEN_DIALS_MS);
         }
@@ -117,18 +143,14 @@ async function runPollCycle() {
         );
         log(
           'success',
-          `Txn #${txn.id} complete — Sambaza KES ${delivered} to ${job.plan.phone}`
+          `Txn #${txn.id} complete — Sambaza KES ${cumulativeDelivered} total to ${job.plan.phone}`
         );
       } else {
-        const reason =
-          delivered > 0
-            ? `Partial: delivered KES ${delivered}/${job.plan.totalAmount}. ${failReason}`
-            : failReason;
+        const reason = `Delivered KES ${cumulativeDelivered}/${txn.amount} so far. ${failReason}`;
         await reportFail(txn.id, reason).catch(() => {});
         log('error', `Txn #${txn.id} failed: ${reason}`);
       }
 
-      // Pause between different customers
       await sleep(DELAY_BETWEEN_DIALS_MS);
     }
   } catch (e: any) {
