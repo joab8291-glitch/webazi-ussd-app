@@ -9,11 +9,21 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "withoutCredentials": true
+      }
     },
     "production": {
       "autoIncrement": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk",
+        "enableMinification": true,
+        "enableShrinking": true,
+        "withoutCredentials": true
+      }
     }
   },
   "submit": {
