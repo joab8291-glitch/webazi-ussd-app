@@ -5,6 +5,7 @@ export type Transaction = {
   receipt: string;
   phone: string;
   amount: number;
+  delivered_amount: number;
   status: 'pending' | 'completed' | 'failed' | 'retry';
   attempts: number;
   failure_reason: string | null;
@@ -56,6 +57,12 @@ export async function reportFail(id: number, reason: string): Promise<void> {
 
 export async function requeue(id: number): Promise<void> {
   await request(`/transactions/${id}/requeue`, { method: 'POST' });
+}
+export async function reportProgress(id: number, deliveredAmount: number): Promise<void> {
+  await request(`/transactions/${id}/progress`, {
+    method: 'POST',
+    body: JSON.stringify({ deliveredAmount }),
+  });
 }
 
 export async function healthCheck(): Promise<{ status: string; timestamp?: string }> {
