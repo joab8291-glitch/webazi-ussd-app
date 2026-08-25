@@ -151,7 +151,7 @@ class UssdExecutorModule : Module() {
         }
 
         if (targetHandle == null) {
-          UssdAccessibilityService.onResult = null
+          UssdAccessibilityService.cancelRequest()
 
           sendEvent(
             "onUssdResult",
@@ -192,7 +192,7 @@ class UssdExecutorModule : Module() {
         context.startActivity(intent)
 
       } catch (e: SecurityException) {
-        UssdAccessibilityService.onResult = null
+        UssdAccessibilityService.cancelRequest()
 
         sendEvent(
           "onUssdResult",
@@ -203,7 +203,7 @@ class UssdExecutorModule : Module() {
         )
 
       } catch (e: Exception) {
-        UssdAccessibilityService.onResult = null
+        UssdAccessibilityService.cancelRequest()
 
         sendEvent(
           "onUssdResult",
@@ -240,76 +240,91 @@ class UssdExecutorModule : Module() {
    *
    *   "Dear Customer, Your request cannot be processed now..."
    */
-  private fun classifyUssdResult(resultText: String): Pair<Boolean, String> {
-    val text = resultText
-      .replace(Regex("\\s+"), " ")
-      .trim()
+  private fun classifyUssdResult(
+  resultText: String
+): Pair<Boolean, String> {
 
-    if (text.isBlank()) {
-      return Pair(false, "Empty USSD response")
-    }
+  val text = resultText
+    .replace(Regex("\\s+"), " ")
+    .trim()
 
-    val lower = text.lowercase()
-
-    /*
-     * Confirmed Safaricom Sambaza success format:
-     *
-     * "You have successfully sent Ksh 50.00 airtime to 0722 123 456"
-     *
-     * We require BOTH:
-     *   1. "successfully sent"
-     *   2. "airtime"
-     *   3. "to" followed by a Kenyan phone number
-     *
-     * This prevents generic words such as "successful" from being enough
-     * to mark a transaction as completed.
-     */
-    val safaricomSuccess = Regex(
-      """you\s+have\s+successfully\s+sent\s+ksh\s*[\d,]+(?:\.\d{1,2})?\s+airtime\s+to\s+(?:0[17]\d{8}|254[17]\d{8})""",
-      RegexOption.IGNORE_CASE
-    )
-
-    if (safaricomSuccess.containsMatchIn(text)) {
-      return Pair(true, text)
-    }
-
-    /*
-     * Known Safaricom failure responses.
-     *
-     * These MUST never be reported as successful.
-     */
-    val failurePatterns = listOf(
-      "insufficient account balance",
-      "insufficient airtime balance",
-      "insufficient airtime",
-      "insufficient balance",
-      "invalid number",
-      "transaction failed",
-      "unable to complete request",
-      "request cannot be processed",
-      "cannot be processed",
-      "failed to",
-      "failure",
-      "error"
-    )
-
-    for (pattern in failurePatterns) {
-      if (lower.contains(pattern)) {
-        return Pair(false, text)
-      }
-    }
-
-    /*
-     * Unknown response = failure.
-     *
-     * Never allow an unknown USSD dialog to cause the backend transaction
-     * to be marked completed.
-     */
-    return Pair(
-      false,
-      "Unrecognized USSD response: $text"
-    )
+  if (text.isBlank()) {
+    return Pair(false, "Empty USSD response")
   }
+
+  val lower = text.lowercase()
+
+  /*
+   * SAFARICOM SUCCESS
+   *
+   * Example:
+   * You have successfully sent Ksh 50.00 airtime to 0722 123 456
+   */
+  val safaricomSuccess = Regex(
+    """you\s+have\s+successfully\s+sent\s+ksh\s*[\d,]+(?:\.\d{1,2})?\s+airtime\s+to\s+(?:0[17]\d{8}|254[17]\d{8})""",
+    RegexOption.IGNORE_CASE
+  )
+
+  /*
+   * AIRTEL SUCCESS
+   *
+   * Example:
+   * You have successfully transferred Ksh 50.00 to 0733 456 789
+   */
+  val airtelSuccess = Regex(
+    """you\s+have\s+successfully\s+transferred\s+ksh\s*[\d,]+(?:\.\d{1,2})?\s+to\s+(?:0[17]\d{8}|254[17]\d{8})""",
+    RegexOption.IGNORE_CASE
+  )
+
+  if (safaricomSuccess.containsMatchIn(text)) {
+    return Pair(true, text)
+  }
+
+  if (airtelSuccess.containsMatchIn(text)) {
+    return Pair(true, text)
+  }
+
+  /*
+   * Known failure responses.
+   *
+   * These must NEVER be reported as successful.
+   */
+  val failurePatterns = listOf(
+    "insufficient account balance",
+    "insufficient airtime balance",
+    "insufficient airtime",
+    "insufficient balance",
+    "invalid number",
+    "invalid phone number",
+    "transaction failed",
+    "transaction was unsuccessful",
+    "unable to complete request",
+    "request cannot be processed",
+    "cannot be processed",
+    "failed to",
+    "failure",
+    "error",
+    "not enough balance",
+    "you do not have enough",
+    "sorry"
+  )
+
+  for (pattern in failurePatterns) {
+    if (lower.contains(pattern)) {
+      return Pair(false, text)
+    }
+  }
+
+  /*
+   * Unknown carrier response = FAILURE.
+   *
+   * This is intentionally conservative.
+   */
+  return Pair(
+    false,
+    "Unrecognized USSD response: $text"
+  )
+}
 
   private fun getSubscriptionIdForPhoneAccount(
     context: Context,
