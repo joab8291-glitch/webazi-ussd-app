@@ -29,7 +29,13 @@ class UssdExecutorModule : Module() {
           Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         )
 
-        enabled = enabledServices?.contains(context.packageName) == true
+        enabledServices?.split(":")?.any {
+          it.equals(
+            "${context.packageName}/expo.modules.ussdexecutor.UssdAccessibilityService",
+            ignoreCase = true
+          ) ||
+          it.contains(context.packageName, ignoreCase = true)
+        } == true
       }
 
       enabled
@@ -48,9 +54,9 @@ class UssdExecutorModule : Module() {
 
     // Dial USSD using the exact Android subscription ID selected by the user.
     Function("dialUssd") {
-        ussdCode: String,
-        subscriptionId: Int,
-        menuInputs: List<String> ->
+      ussdCode: String,
+      subscriptionId: Int,
+      menuInputs: List<String> ->
 
       val context = appContext.reactContext
 
@@ -91,16 +97,31 @@ class UssdExecutorModule : Module() {
         return@Function
       }
 
+      /*
+       * IMPORTANT:
+       * The Accessibility Service must NOT automatically report every dialog
+       * as successful.
+       *
+       * The service gives us the actual text displayed by the carrier.
+       * We classify that response here and only return success=true when the
+       * response matches a confirmed Safaricom Sambaza success message.
+       */
       UssdAccessibilityService.pendingInputs = menuInputs.toMutableList()
 
       UssdAccessibilityService.onResult = { resultText ->
+
+        val classification = classifyUssdResult(resultText)
+
         sendEvent(
           "onUssdResult",
           mapOf(
             "result" to resultText,
-            "success" to true
+            "success" to classification.first
           )
         )
+
+        // Prevent an old callback from being triggered by a later USSD event.
+        UssdAccessibilityService.onResult = null
       }
 
       try {
@@ -130,6 +151,8 @@ class UssdExecutorModule : Module() {
         }
 
         if (targetHandle == null) {
+          UssdAccessibilityService.onResult = null
+
           sendEvent(
             "onUssdResult",
             mapOf(
@@ -140,10 +163,18 @@ class UssdExecutorModule : Module() {
           return@Function
         }
 
-        // FIX: Uri.fromParts() re-encodes its input internally, which double-encodes
-        // the already-encoded '#' (%23 -> %2523), corrupting the USSD code when the
-        // system dialer parses it (e.g. *334# becomes *33423). Uri.parse() takes the
-        // string literally, so a single Uri.encode() pass is correct here.
+        /*
+         * IMPORTANT USSD URI FIX:
+         *
+         * Uri.fromParts() can re-encode an already encoded '#'.
+         * That can turn:
+         *
+         *   *140*50*254712345678#
+         *
+         * into a corrupted dial string.
+         *
+         * Uri.parse() with one Uri.encode() pass avoids the double-encoding.
+         */
         val uri = Uri.parse("tel:" + Uri.encode(ussdCode))
 
         val intent = Intent(
@@ -161,6 +192,8 @@ class UssdExecutorModule : Module() {
         context.startActivity(intent)
 
       } catch (e: SecurityException) {
+        UssdAccessibilityService.onResult = null
+
         sendEvent(
           "onUssdResult",
           mapOf(
@@ -170,6 +203,8 @@ class UssdExecutorModule : Module() {
         )
 
       } catch (e: Exception) {
+        UssdAccessibilityService.onResult = null
+
         sendEvent(
           "onUssdResult",
           mapOf(
@@ -179,6 +214,101 @@ class UssdExecutorModule : Module() {
         )
       }
     }
+  }
+
+  /**
+   * Classifies the actual carrier response.
+   *
+   * SUCCESS:
+   * Safaricom Sambaza must explicitly confirm that airtime was sent.
+   *
+   * FAILURE:
+   * Known carrier failure responses are rejected.
+   *
+   * UNKNOWN:
+   * Unknown responses are deliberately treated as failures.
+   *
+   * This is important because the previous implementation did:
+   *
+   *   success = true
+   *
+   * for EVERY accessibility result, including:
+   *
+   *   "Sorry, you have insufficient account balance to sambaza..."
+   *
+   * and:
+   *
+   *   "Dear Customer, Your request cannot be processed now..."
+   */
+  private fun classifyUssdResult(resultText: String): Pair<Boolean, String> {
+    val text = resultText
+      .replace(Regex("\\s+"), " ")
+      .trim()
+
+    if (text.isBlank()) {
+      return Pair(false, "Empty USSD response")
+    }
+
+    val lower = text.lowercase()
+
+    /*
+     * Confirmed Safaricom Sambaza success format:
+     *
+     * "You have successfully sent Ksh 50.00 airtime to 0722 123 456"
+     *
+     * We require BOTH:
+     *   1. "successfully sent"
+     *   2. "airtime"
+     *   3. "to" followed by a Kenyan phone number
+     *
+     * This prevents generic words such as "successful" from being enough
+     * to mark a transaction as completed.
+     */
+    val safaricomSuccess = Regex(
+      """you\s+have\s+successfully\s+sent\s+ksh\s*[\d,]+(?:\.\d{1,2})?\s+airtime\s+to\s+(?:0[17]\d{8}|254[17]\d{8})""",
+      RegexOption.IGNORE_CASE
+    )
+
+    if (safaricomSuccess.containsMatchIn(text)) {
+      return Pair(true, text)
+    }
+
+    /*
+     * Known Safaricom failure responses.
+     *
+     * These MUST never be reported as successful.
+     */
+    val failurePatterns = listOf(
+      "insufficient account balance",
+      "insufficient airtime balance",
+      "insufficient airtime",
+      "insufficient balance",
+      "invalid number",
+      "transaction failed",
+      "unable to complete request",
+      "request cannot be processed",
+      "cannot be processed",
+      "failed to",
+      "failure",
+      "error"
+    )
+
+    for (pattern in failurePatterns) {
+      if (lower.contains(pattern)) {
+        return Pair(false, text)
+      }
+    }
+
+    /*
+     * Unknown response = failure.
+     *
+     * Never allow an unknown USSD dialog to cause the backend transaction
+     * to be marked completed.
+     */
+    return Pair(
+      false,
+      "Unrecognized USSD response: $text"
+    )
   }
 
   private fun getSubscriptionIdForPhoneAccount(
