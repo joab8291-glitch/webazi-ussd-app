@@ -106,7 +106,7 @@ class UssdExecutorModule : Module() {
        * We classify that response here and only return success=true when the
        * response matches a confirmed Safaricom Sambaza success message.
        */
-      UssdAccessibilityService.pendingInputs = menuInputs.toMutableList()
+      UssdAccessibilityService.beginRequest(menuInputs)
 
       UssdAccessibilityService.onResult = { resultText ->
 
