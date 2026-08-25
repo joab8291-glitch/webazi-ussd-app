@@ -3,247 +3,154 @@ package expo.modules.ussdexecutor
 import android.accessibilityservice.AccessibilityService
 import android.os.Bundle
 import android.util.Log
-import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityEvent
 
 class UssdAccessibilityService : AccessibilityService() {
 
   companion object {
     private const val TAG = "UssdAccessibility"
 
+    @Volatile
     var pendingInputs: MutableList<String> = mutableListOf()
 
-    var onResult: ((String, Boolean) -> Unit)? = null
+    @Volatile
+    var onResult: ((String) -> Unit)? = null
 
-    // True only after a USSD session has actually been started.
-    private var sessionActive = false
-
-    // When entering menu inputs, ignore accessibility events until the
-    // Send/OK button has actually been pressed.
+    @Volatile
     private var waitingForFinalResult = false
 
-    // Prevent duplicate callbacks for the same USSD session.
-    private var resultSent = false
+    @Volatile
+    private var requestActive = false
 
-    fun startSession(inputs: List<String>) {
+    fun beginRequest(inputs: List<String>) {
       pendingInputs = inputs.toMutableList()
-      sessionActive = true
-      resultSent = false
+      requestActive = true
       waitingForFinalResult = inputs.isEmpty()
 
       Log.d(
         TAG,
-        "=== USSD SESSION STARTED === inputs=$inputs waitingForFinalResult=$waitingForFinalResult"
+        "USSD request started. pendingInputs=${pendingInputs.size}"
       )
     }
 
-    fun cancelSession() {
+    fun cancelRequest() {
       pendingInputs.clear()
-      sessionActive = false
+      requestActive = false
       waitingForFinalResult = false
-      resultSent = false
       onResult = null
 
-      Log.d(TAG, "=== USSD SESSION CANCELLED ===")
+      Log.d(TAG, "USSD request cancelled")
     }
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
     if (event == null) return
-    if (!sessionActive || resultSent) return
+
+    if (!requestActive) {
+      return
+    }
 
     Log.d(
       TAG,
-      "Event: type=${event.eventType} package=${event.packageName} class=${event.className}"
+      "Event: type=${event.eventType} " +
+        "package=${event.packageName} " +
+        "class=${event.className}"
     )
 
     val rootNode = rootInActiveWindow ?: return
 
+    logNodeTree(rootNode, 0)
+
     val dialogText = extractText(rootNode)
 
-    if (dialogText.isNullOrBlank()) return
-
-    Log.d(TAG, "Extracted dialog text: $dialogText")
-
-    /*
-     * If we still have menu inputs, this is an input screen.
-     *
-     * Do NOT treat its text as the final result.
-     */
-    if (pendingInputs.isNotEmpty()) {
-      if (!waitingForFinalResult) {
-        val nextInput = pendingInputs.removeAt(0)
-
-        Log.d(TAG, "Sending queued input: $nextInput")
-
-        typeAndSend(rootNode, nextInput)
-
-        return
-      }
-    }
-
-    /*
-     * We are waiting for the actual carrier response.
-     *
-     * Ignore intermediate USSD screens.
-     */
-    if (!waitingForFinalResult) {
-      Log.d(TAG, "Waiting for Send/OK before processing final result")
+    if (dialogText.isNullOrBlank()) {
       return
     }
 
-    val result = classifyUssdResult(dialogText)
+    Log.d(TAG, "Extracted USSD text: $dialogText")
 
-    when (result) {
-      UssdResult.SUCCESS -> {
-        Log.d(TAG, "=== VERIFIED USSD SUCCESS ===")
-        completeSession(dialogText, true)
-      }
+    /*
+     * IMPORTANT:
+     *
+     * A USSD session normally starts with a dialog/menu.
+     *
+     * We must NOT immediately report that dialog as the final result.
+     *
+     * If there are queued menu inputs, look for an editable field and
+     * submit the next input.
+     */
+    if (pendingInputs.isNotEmpty()) {
+      val editField = findEditableNode(rootNode)
 
-      UssdResult.FAILURE -> {
-        Log.w(TAG, "=== VERIFIED USSD FAILURE ===")
-        completeSession(dialogText, false)
-      }
+      if (editField != null) {
+        val nextInput = pendingInputs.removeAt(0)
 
-      UssdResult.UNKNOWN -> {
-        /*
-         * IMPORTANT:
-         *
-         * Unknown does NOT mean success.
-         *
-         * We simply wait for another accessibility event containing the
-         * actual carrier response. The JS poller will eventually timeout
-         * if no definitive response arrives.
-         */
         Log.d(
           TAG,
-          "USSD response not yet definitive — waiting for final carrier response"
+          "USSD input field found. Sending queued input: $nextInput"
         )
+
+        typeAndSend(rootNode, editField, nextInput)
+
+        if (pendingInputs.isEmpty()) {
+          waitingForFinalResult = true
+        }
+
+        return
       }
+
+      /*
+       * The dialog has text but no editable field.
+       *
+       * It may be an intermediate confirmation screen. Do not mark it
+       * successful. Wait for the next accessibility event.
+       */
+      Log.d(
+        TAG,
+        "Dialog contains text but no editable field yet. Waiting."
+      )
+
+      return
+    }
+
+    /*
+     * No more menu inputs.
+     *
+     * Now we are waiting for the carrier's final response.
+     *
+     * Only invoke onResult after we have a meaningful final dialog.
+     */
+    if (waitingForFinalResult) {
+      Log.d(
+        TAG,
+        "Final USSD response detected: $dialogText"
+      )
+
+      waitingForFinalResult = false
+      requestActive = false
+
+      val callback = onResult
+      onResult = null
+
+      callback?.invoke(dialogText)
     }
   }
 
   override fun onInterrupt() {
-    Log.w(TAG, "Accessibility service interrupted")
+    Log.d(TAG, "Accessibility service interrupted")
   }
 
-  private enum class UssdResult {
-    SUCCESS,
-    FAILURE,
-    UNKNOWN
-  }
-
-  /**
-   * Classify the actual carrier response.
-   *
-   * SUCCESS is intentionally strict.
-   *
-   * We do NOT accept generic words such as:
-   * "successful"
-   * "success"
-   * "completed"
-   *
-   * unless they appear in the expected successful Sambaza response.
-   */
-  private fun classifyUssdResult(text: String): UssdResult {
-    val normalized = text
-      .replace("\n", " ")
-      .replace("\r", " ")
-      .replace("\\s+".toRegex(), " ")
-      .trim()
-      .lowercase()
-
-    Log.d(TAG, "Classifying USSD response: $normalized")
-
-    /*
-     * Safaricom Sambaza success.
-     *
-     * Example:
-     * "You have successfully sent Ksh 50.00 airtime to 0722 123 456
-     *  Your new balance is Ksh 12.34
-     *  Transaction cost: Ksh 1.00"
-     *
-     * Require BOTH:
-     * - successfully sent
-     * - airtime
-     *
-     * This prevents generic "successful" text from being accepted.
-     */
-    val safaricomSuccess =
-      normalized.contains("successfully sent") &&
-      normalized.contains("airtime")
-
-    if (safaricomSuccess) {
-      return UssdResult.SUCCESS
-    }
-
-    /*
-     * Other known Safaricom success wording.
-     */
-    if (
-      normalized.contains("you have successfully sent") &&
-      normalized.contains("ksh")
-    ) {
-      return UssdResult.SUCCESS
-    }
-
-    /*
-     * Known failure responses.
-     */
-    val failurePatterns = listOf(
-      "insufficient account balance",
-      "insufficient airtime balance",
-      "insufficient balance",
-      "invalid number",
-      "transaction failed",
-      "unable to complete request",
-      "unable to complete",
-      "request cannot be processed",
-      "cannot be processed now",
-      "please try again later",
-      "try again later",
-      "failed to process",
-      "transaction could not be completed",
-      "could not be completed",
-      "not enough airtime",
-      "not enough balance",
-      "invalid recipient"
-    )
-
-    if (failurePatterns.any { normalized.contains(it) }) {
-      return UssdResult.FAILURE
-    }
-
-    return UssdResult.UNKNOWN
-  }
-
-  private fun completeSession(
-    resultText: String,
-    success: Boolean
-  ) {
-    if (resultSent) return
-
-    resultSent = true
-    sessionActive = false
-    waitingForFinalResult = false
-    pendingInputs.clear()
-
-    Log.d(
-      TAG,
-      "=== USSD SESSION COMPLETE === success=$success result=$resultText"
-    )
-
-    onResult?.invoke(resultText, success)
-    onResult = null
-  }
-
-  /**
-   * Dumps the accessibility node tree for debugging Samsung's USSD UI.
-   */
   private fun logNodeTree(
     node: AccessibilityNodeInfo,
     depth: Int
   ) {
+    /*
+     * Prevent an unexpectedly huge accessibility tree from flooding
+     * logcat.
+     */
+    if (depth > 15) return
+
     val indent = "  ".repeat(depth)
 
     Log.d(
@@ -256,8 +163,11 @@ class UssdAccessibilityService : AccessibilityService() {
     )
 
     for (i in 0 until node.childCount) {
-      node.getChild(i)?.let {
-        logNodeTree(it, depth + 1)
+      try {
+        node.getChild(i)?.let {
+          logNodeTree(it, depth + 1)
+        }
+      } catch (_: Exception) {
       }
     }
   }
@@ -271,6 +181,7 @@ class UssdAccessibilityService : AccessibilityService() {
 
     return builder
       .toString()
+      .replace(Regex("\\s+"), " ")
       .trim()
       .ifBlank { null }
   }
@@ -284,105 +195,85 @@ class UssdAccessibilityService : AccessibilityService() {
     }
 
     for (i in 0 until node.childCount) {
-      node.getChild(i)?.let {
-        collectText(it, builder)
+      try {
+        node.getChild(i)?.let {
+          collectText(it, builder)
+        }
+      } catch (_: Exception) {
       }
     }
   }
 
+  /**
+   * Send a menu/input value into the current USSD dialog.
+   *
+   * IMPORTANT:
+   *
+   * ACTION_SET_TEXT replaces the complete contents of the field.
+   * Therefore we set the complete input ONCE.
+   *
+   * The old implementation attempted to send one character at a time
+   * using ACTION_SET_TEXT. That does not behave like keyboard typing and
+   * can leave only the final character in the field.
+   */
   private fun typeAndSend(
     root: AccessibilityNodeInfo,
+    editField: AccessibilityNodeInfo,
     input: String
   ) {
-    val editField = findEditableNode(root)
-
-    if (editField == null) {
-      Log.w(TAG, "No editable field found — cannot send input")
-
-      /*
-       * Do not leave the session pretending everything is fine.
-       * The JS side will eventually timeout.
-       */
-      waitingForFinalResult = false
-      return
-    }
-
     try {
-      Log.d(TAG, "=== TYPING USSD INPUT ===")
-      Log.d(TAG, "Input='$input' length=${input.length}")
+      Log.d(TAG, "=== SETTING USSD INPUT ===")
+      Log.d(TAG, "Input='$input'")
 
-      /*
-       * We are currently editing an input field.
-       * Ignore accessibility events until Send is clicked.
-       */
-      waitingForFinalResult = false
+      val args = Bundle()
 
-      Log.d(TAG, "Step 1: Clearing field")
-
-      val clearArgs = Bundle()
-
-      clearArgs.putCharSequence(
+      args.putCharSequence(
         AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-        ""
+        input
       )
 
-      editField.performAction(
+      val setResult = editField.performAction(
         AccessibilityNodeInfo.ACTION_SET_TEXT,
-        clearArgs
+        args
       )
 
-      Thread.sleep(100)
+      Log.d(
+        TAG,
+        "ACTION_SET_TEXT result=$setResult"
+      )
 
-      Log.d(TAG, "Step 2: Typing input character by character")
-
-      for ((index, char) in input.withIndex()) {
-        Log.d(
-          TAG,
-          "Typing [${
-            index + 1
-          }/${input.length}]: '$char'"
-        )
-
-        val typeArgs = Bundle()
-
-        typeArgs.putCharSequence(
-          AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-          char.toString()
-        )
-
-        editField.performAction(
-          AccessibilityNodeInfo.ACTION_SET_TEXT,
-          typeArgs
-        )
-
-        Thread.sleep(40)
-      }
-
-      Thread.sleep(200)
+      Thread.sleep(250)
 
       val currentText =
         editField.text?.toString() ?: ""
 
       Log.d(
         TAG,
-        "Verification: expected='$input' actual='$currentText'"
+        "Field after input='$currentText'"
       )
 
       if (currentText != input) {
         Log.w(
           TAG,
-          "Input mismatch — expected '$input', got '$currentText'"
+          "USSD input verification mismatch. " +
+            "Expected='$input' actual='$currentText'"
         )
       }
+
+      Thread.sleep(250)
 
       clickSendButton(root)
 
     } catch (e: Exception) {
       Log.e(
         TAG,
-        "Error in typeAndSend: ${e.message}",
+        "Error entering USSD input: ${e.message}",
         e
       )
+
+      /*
+       * If an input cannot be entered, do not report success.
+       */
     }
   }
 
@@ -390,36 +281,35 @@ class UssdAccessibilityService : AccessibilityService() {
     root: AccessibilityNodeInfo
   ) {
     try {
-      Log.d(TAG, "Finding Send/OK button")
+      Log.d(TAG, "Finding USSD send/OK button")
 
-      val sendButton = findClickableButton(root)
+      val sendButton =
+        findClickableButton(root)
 
       if (sendButton == null) {
-        Log.w(TAG, "No Send/OK button found")
+        Log.w(
+          TAG,
+          "No clickable USSD send/OK button found"
+        )
         return
       }
 
       Thread.sleep(150)
-
-      Log.d(TAG, "Clicking Send/OK button")
 
       val clicked =
         sendButton.performAction(
           AccessibilityNodeInfo.ACTION_CLICK
         )
 
-      Log.d(TAG, "Send button clicked=$clicked")
-
-      /*
-       * Only NOW should accessibility events be considered final
-       * carrier responses.
-       */
-      waitingForFinalResult = true
+      Log.d(
+        TAG,
+        "USSD send button clicked=$clicked"
+      )
 
     } catch (e: Exception) {
       Log.e(
         TAG,
-        "Error clicking Send/OK: ${e.message}",
+        "Error clicking USSD send button: ${e.message}",
         e
       )
     }
@@ -428,13 +318,18 @@ class UssdAccessibilityService : AccessibilityService() {
   private fun findEditableNode(
     node: AccessibilityNodeInfo
   ): AccessibilityNodeInfo? {
-    if (node.isEditable) return node
+    if (node.isEditable) {
+      return node
+    }
 
     for (i in 0 until node.childCount) {
-      node.getChild(i)?.let { child ->
-        findEditableNode(child)?.let {
-          return it
+      try {
+        node.getChild(i)?.let { child ->
+          findEditableNode(child)?.let {
+            return it
+          }
         }
+      } catch (_: Exception) {
       }
     }
 
@@ -444,24 +339,38 @@ class UssdAccessibilityService : AccessibilityService() {
   private fun findClickableButton(
     node: AccessibilityNodeInfo
   ): AccessibilityNodeInfo? {
+
     val className =
       node.className?.toString()?.lowercase() ?: ""
 
+    val text =
+      node.text?.toString()?.lowercase() ?: ""
+
+    /*
+     * Prefer obvious Send/OK/Continue buttons.
+     */
     if (
       node.isClickable &&
       (
-        className.contains("button") ||
-        className.contains("textview")
+        text == "send" ||
+        text == "ok" ||
+        text == "yes" ||
+        text == "continue" ||
+        text == "submit" ||
+        className.contains("button")
       )
     ) {
       return node
     }
 
     for (i in 0 until node.childCount) {
-      node.getChild(i)?.let { child ->
-        findClickableButton(child)?.let {
-          return it
+      try {
+        node.getChild(i)?.let { child ->
+          findClickableButton(child)?.let {
+            return it
+          }
         }
+      } catch (_: Exception) {
       }
     }
 
