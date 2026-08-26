@@ -45,6 +45,7 @@ type State = {
   markCompleted: (id: string) => void;
   markFailed: (id: string, reason: string) => void;
   bumpAttempts: (id: string) => void;
+  deleteTransaction: (id: string) => void;
 };
 
 export const useTransactionStore = create<State>()(
@@ -132,6 +133,12 @@ export const useTransactionStore = create<State>()(
           transactions: s.transactions.map((t) =>
             t.id === id ? { ...t, attempts: t.attempts + 1 } : t
           ),
+        }));
+      },
+
+      deleteTransaction: (id) => {
+        set((s) => ({
+          transactions: s.transactions.filter((t) => t.id !== id),
         }));
       },
     }),
