@@ -11,17 +11,20 @@ import type { SmsReceivedPayload } from '../modules/sms-listener/src/SmsListener
 
 import UssdExecutor from '../modules/ussd-executor/src/UssdExecutorModule';
 
-import { decodeAccountRef, extractAccountRef, toMsisdn } from './accountRef';
+import { decodeAccountRef, extractAccountRef, extractReceipt, toMsisdn } from './accountRef';
 import { planFulfillment } from './offerMatcher';
 
 import { useSimStore } from '../store/useSimStore';
 import { useActivityStore } from '../store/useActivityStore';
+import { useTransactionStore } from '../store/useTransactionStore';
+import type { DialResult, LocalTransaction } from '../store/useTransactionStore';
 
 import { notifyWhatsApp } from './whatsapp';
 
 let smsSubscription: EventSubscription | null = null;
 
 type DialJob = {
+  txnId: string;
   network: 'safaricom' | 'airtel';
   amount: number;
   phone: string; // local format, e.g. 0735830024
@@ -263,7 +266,18 @@ function handleSms(event: SmsReceivedPayload) {
     `Decoded ${ref} → ${network} KES ${amount} to ${phone}. ${job.summary}`
   );
 
+  const receipt = extractReceipt(event.body);
+
+  const txnId = useTransactionStore.getState().addPending({
+    ref,
+    receipt,
+    network,
+    phone,
+    amount,
+  });
+
   enqueueDial({
+    txnId,
     network,
     amount,
     phone,
@@ -319,6 +333,7 @@ async function processDialQueue() {
  */
 async function autoDial(job: DialJob) {
   const log = useActivityStore.getState().addLog;
+  const txnStore = useTransactionStore.getState();
 
   try {
     /**
@@ -328,6 +343,7 @@ async function autoDial(job: DialJob) {
 
     if (!callOk) {
       log('error', 'CALL_PHONE denied');
+      txnStore.markFailed(job.txnId, 'CALL_PHONE permission denied');
       return;
     }
 
@@ -335,12 +351,13 @@ async function autoDial(job: DialJob) {
      * USSD automation requires the Accessibility service.
      */
     if (!UssdExecutor.isAccessibilityEnabled()) {
-      log(
-        'error',
-        'Enable Accessibility service for Webazi in system settings'
-      );
+      const reason = 'Accessibility service not enabled — cannot dial USSD';
+
+      log('error', `Enable Accessibility service for Webazi in system settings`);
 
       UssdExecutor.openAccessibilitySettings();
+
+      txnStore.markFailed(job.txnId, reason);
 
       return;
     }
@@ -361,6 +378,15 @@ async function autoDial(job: DialJob) {
         30000
       );
 
+      const dialResult: DialResult = {
+        ussdCode: dial.ussdCode,
+        amount: dial.amount,
+        success: outcome.success,
+        result: outcome.result,
+      };
+
+      txnStore.recordDialResult(job.txnId, dialResult);
+
       if (!outcome.success) {
         allOk = false;
         failReason = `${dial.label} failed: ${outcome.result}`;
@@ -380,6 +406,8 @@ async function autoDial(job: DialJob) {
         `KES ${job.amount} delivered to ${job.phone} (${job.network})`
       );
 
+      txnStore.markCompleted(job.txnId);
+
       await notifyWhatsApp({
         to: job.phone,
         template: 'delivery_success',
@@ -391,6 +419,8 @@ async function autoDial(job: DialJob) {
         `Delivery failed for ${job.phone} (${job.network} KES ${job.amount}): ${failReason}`
       );
 
+      txnStore.markFailed(job.txnId, failReason);
+
       await notifyWhatsApp({
         to: job.phone,
         template: 'delivery_failed',
@@ -399,11 +429,54 @@ async function autoDial(job: DialJob) {
       }).catch(() => {});
     }
   } catch (e: any) {
+    const reason = String(e?.message ?? e);
+
+    log('error', `autoDial error: ${reason}`);
+
+    txnStore.markFailed(job.txnId, reason);
+  }
+}
+
+/**
+ * Re-run delivery for a failed order from the Orders screen's "Requeue"
+ * action. Rebuilds the USSD dial plan and dials again from the same
+ * per-network execution SIM — entirely local, no backend involved.
+ */
+export async function retryDelivery(txn: LocalTransaction) {
+  const log = useActivityStore.getState().addLog;
+
+  const executionSubId =
+    txn.network === 'airtel'
+      ? useSimStore.getState().airtelExecutionSubscriptionId
+      : useSimStore.getState().safaricomExecutionSubscriptionId;
+
+  if (executionSubId == null) {
     log(
       'error',
-      `autoDial error: ${String(e?.message ?? e)}`
+      `No execution SIM configured for ${txn.network} — set it in Settings`
     );
+
+    return;
   }
+
+  const job = planFulfillment(toMsisdn(txn.phone), txn.amount);
+
+  if (!job) {
+    log('error', `Cannot retry ${txn.ref}: invalid phone/amount`);
+    return;
+  }
+
+  useTransactionStore.getState().bumpAttempts(txn.id);
+
+  enqueueDial({
+    txnId: txn.id,
+    network: txn.network,
+    amount: txn.amount,
+    phone: txn.phone,
+    executionSubId,
+    dials: job.dials,
+    summary: job.summary,
+  });
 }
 
 /**
