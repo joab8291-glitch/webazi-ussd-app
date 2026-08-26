@@ -1,6 +1,6 @@
 apply plugin: 'com.android.library'
 
-group = 'expo.modules.ussdexecutor'
+group = 'expo.modules.smslistener'
 version = ''
 
 def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
@@ -32,7 +32,7 @@ if (useManagedAndroidSdkVersions) {
 }
 
 android {
-  namespace "expo.modules.ussdexecutor"
+  namespace "expo.modules.smslistener"
   defaultConfig {
     versionCode 1
     versionName ""
