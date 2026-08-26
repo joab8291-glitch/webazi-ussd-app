@@ -35,10 +35,6 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-export async function fetchPending(): Promise<Transaction[]> {
-  return request<Transaction[]>('/transactions/pending');
-}
-
 export async function fetchAll(status?: string): Promise<Transaction[]> {
   const url = status ? `/transactions?status=${encodeURIComponent(status)}` : '/transactions';
   return request<Transaction[]>(url);
@@ -58,13 +54,6 @@ export async function reportFail(id: number, reason: string): Promise<void> {
 export async function requeue(id: number): Promise<void> {
   await request(`/transactions/${id}/requeue`, { method: 'POST' });
 }
-export async function reportProgress(id: number, deliveredAmount: number): Promise<void> {
-  await request(`/transactions/${id}/progress`, {
-    method: 'POST',
-    body: JSON.stringify({ deliveredAmount }),
-  });
-}
-
 export async function healthCheck(): Promise<{ status: string; timestamp?: string }> {
   return request('/health');
 }
