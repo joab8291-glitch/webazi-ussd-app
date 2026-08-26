@@ -51,6 +51,16 @@ export function extractAccountRef(smsBody: string): string | null {
   return match ? match[1] : null;
 }
 
+/**
+ * Pulls the M-PESA receipt code from the start of a confirmation SMS
+ * (e.g. "UHOO43KO9X Confirmed. You have received..."). Purely for
+ * display/reconciliation — not used for decoding.
+ */
+export function extractReceipt(smsBody: string): string | null {
+  const match = smsBody.trim().match(/^([A-Z0-9]{8,12})\s+Confirmed/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
 /** Normalizes a local (0...) phone number to 2547.../2541... for USSD "pn" fields. */
 export function toMsisdn(localPhone: string): string {
   if (localPhone.startsWith('0')) return '254' + localPhone.slice(1);
