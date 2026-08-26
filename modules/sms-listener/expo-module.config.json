@@ -1,6 +1,6 @@
 {
   "platforms": ["android"],
   "android": {
-    "modules": ["expo.modules.ussdexecutor.UssdExecutorModule"]
+    "modules": ["expo.modules.smslistener.SmsListenerModule"]
   }
 }
