@@ -18,6 +18,7 @@ import { useSimStore } from '../store/useSimStore';
 import { useActivityStore } from '../store/useActivityStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import type { DialResult, LocalTransaction } from '../store/useTransactionStore';
+import { useUnmatchedStore } from '../store/useUnmatchedStore';
 
 import { notifyWhatsApp } from './whatsapp';
 
@@ -210,11 +211,20 @@ function handleSms(event: SmsReceivedPayload) {
 
   /**
    * Pull the account reference out of the SMS. If there isn't one, this
-   * isn't a Webazi order confirmation — ignore silently.
+   * isn't a Webazi order confirmation — log it to the unmatched bucket
+   * (Airtime Manager → Unmatched) so a paid customer isn't silently lost,
+   * then stop.
    */
   const ref = extractAccountRef(event.body);
 
   if (!ref) {
+    useUnmatchedStore.getState().addUnmatched({
+      sender: event.sender,
+      subscriptionId: event.subscriptionId,
+      body: event.body,
+      reason: 'no_ref',
+    });
+
     return;
   }
 
@@ -225,6 +235,14 @@ function handleSms(event: SmsReceivedPayload) {
       'warn',
       `Found account ref "${ref}" but could not decode it — ignoring`
     );
+
+    useUnmatchedStore.getState().addUnmatched({
+      sender: event.sender,
+      subscriptionId: event.subscriptionId,
+      body: event.body,
+      reason: 'undecodable_ref',
+      ref,
+    });
 
     return;
   }
@@ -547,6 +565,64 @@ function dialWithTimeout(
       });
     }
   });
+}
+
+/**
+ * Manually trigger a delivery without waiting for a payment SMS — for
+ * support/testing, or to resolve an entry from the Unmatched bucket once
+ * you know the real phone/amount. Order-shaped (unlike manualDial, which
+ * just fires a raw USSD code): it goes through the same planFulfillment
+ * queue as an SMS-triggered order, so it shows up on the Orders/Airtime
+ * screens with the same tracking, retries and WhatsApp notifications.
+ */
+export async function manualDeliver(input: {
+  phone: string; // local format, e.g. 0735830024
+  amount: number;
+  network: 'safaricom' | 'airtel';
+}): Promise<{ ok: boolean; reason?: string; txnId?: string }> {
+  const log = useActivityStore.getState().addLog;
+  const { phone, amount, network } = input;
+
+  const executionSubId =
+    network === 'airtel'
+      ? useSimStore.getState().airtelExecutionSubscriptionId
+      : useSimStore.getState().safaricomExecutionSubscriptionId;
+
+  if (executionSubId == null) {
+    const reason = `No execution SIM configured for ${network} — set it in Airtime Manager`;
+    log('error', reason);
+    return { ok: false, reason };
+  }
+
+  const job = planFulfillment(toMsisdn(phone), amount);
+
+  if (!job) {
+    const reason = `Invalid phone or amount (phone=${phone}, amount=${amount})`;
+    log('error', reason);
+    return { ok: false, reason };
+  }
+
+  log('info', `Manual delivery: ${network} KES ${amount} to ${phone}. ${job.summary}`);
+
+  const txnId = useTransactionStore.getState().addPending({
+    ref: `MANUAL-${Date.now()}`,
+    receipt: null,
+    network,
+    phone,
+    amount,
+  });
+
+  enqueueDial({
+    txnId,
+    network,
+    amount,
+    phone,
+    executionSubId,
+    dials: job.dials,
+    summary: job.summary,
+  });
+
+  return { ok: true, txnId };
 }
 
 /**
