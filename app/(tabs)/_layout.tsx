@@ -37,6 +37,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="airtime-manager"
+        options={{
+          title: 'Airtime',
+          tabBarIcon: ({ color }) => <IconSymbol size={26} name="simcard.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
