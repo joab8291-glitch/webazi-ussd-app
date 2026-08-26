@@ -1,5 +1,5 @@
 /**
- * SMS → match plan → auto-dial USSD automation.
+ * SMS → decode account ref → dial Sambaza USSD automation.
  * Uses native SmsListener + UssdExecutor modules.
  */
 
@@ -11,8 +11,8 @@ import type { SmsReceivedPayload } from '../modules/sms-listener/src/SmsListener
 
 import UssdExecutor from '../modules/ussd-executor/src/UssdExecutorModule';
 
-import { processIncomingSms } from '../modules/offer-matcher/matcher';
-import type { DataPlan } from '../modules/offer-matcher/types';
+import { decodeAccountRef, extractAccountRef, toMsisdn } from './accountRef';
+import { planFulfillment } from './offerMatcher';
 
 import { useSimStore } from '../store/useSimStore';
 import { useActivityStore } from '../store/useActivityStore';
@@ -22,9 +22,12 @@ import { notifyWhatsApp } from './whatsapp';
 let smsSubscription: EventSubscription | null = null;
 
 type DialJob = {
-  plan: DataPlan;
-  resolvedUssd: string;
-  customerPhone?: string;
+  network: 'safaricom' | 'airtel';
+  amount: number;
+  phone: string; // local format, e.g. 0735830024
+  executionSubId: number;
+  dials: { ussdCode: string; amount: number; label: string }[];
+  summary: string;
 };
 
 const dialQueue: DialJob[] = [];
@@ -63,7 +66,7 @@ export async function requestCallPermission(): Promise<boolean> {
     {
       title: 'Phone Call Permission',
       message:
-        'Webazi needs permission to dial USSD codes for data delivery.',
+        'Webazi needs permission to dial USSD codes for airtime delivery.',
       buttonPositive: 'Allow',
       buttonNegative: 'Deny',
     }
@@ -167,8 +170,7 @@ export function stopSmsListening() {
 function handleSms(event: SmsReceivedPayload) {
   const log = useActivityStore.getState().addLog;
 
-  const selectedSubscriptionId =
-    useSimStore.getState().tillSubscriptionId;
+  const tillSubscriptionId = useSimStore.getState().tillSubscriptionId;
 
   log(
     'info',
@@ -181,7 +183,7 @@ function handleSms(event: SmsReceivedPayload) {
   /**
    * No Till SIM has been selected.
    */
-  if (selectedSubscriptionId == null) {
+  if (tillSubscriptionId == null) {
     log(
       'warn',
       'SMS received but no Till SIM is selected. Open Settings and select the Till SIM.'
@@ -191,39 +193,66 @@ function handleSms(event: SmsReceivedPayload) {
   }
 
   /**
-   * Ignore SMS messages received on another SIM.
+   * Ignore SMS messages received on another SIM. Payment SMS always
+   * arrives on the Till SIM regardless of which network the order is for.
    */
-  if (event.subscriptionId !== selectedSubscriptionId) {
+  if (event.subscriptionId !== tillSubscriptionId) {
     log(
       'info',
-      `Ignoring SMS from subscription ${event.subscriptionId}; Till SIM is subscription ${selectedSubscriptionId}`
+      `Ignoring SMS from subscription ${event.subscriptionId}; Till SIM is subscription ${tillSubscriptionId}`
     );
 
     return;
   }
 
   /**
-   * Match the SMS against the available plans.
+   * Pull the account reference out of the SMS. If there isn't one, this
+   * isn't a Webazi order confirmation — ignore silently.
    */
-  const match = processIncomingSms(event.body);
+  const ref = extractAccountRef(event.body);
 
-  if (match.status === 'not_a_payment') {
+  if (!ref) {
     return;
   }
 
-  if (match.status === 'no_match') {
+  const decoded = decodeAccountRef(ref);
+
+  if (!decoded) {
     log(
       'warn',
-      `Payment KES ${match.payment.amount} — no matching plan`
+      `Found account ref "${ref}" but could not decode it — ignoring`
     );
 
     return;
   }
 
-  if (match.status === 'missing_phone') {
+  const { network, amount, phone } = decoded;
+
+  /**
+   * Execution SIM is chosen by network, independent of the Till SIM:
+   * Safaricom orders dial from the Safaricom line, Airtel orders dial
+   * from the Airtel line.
+   */
+  const executionSubId =
+    network === 'airtel'
+      ? useSimStore.getState().airtelExecutionSubscriptionId
+      : useSimStore.getState().safaricomExecutionSubscriptionId;
+
+  if (executionSubId == null) {
     log(
-      'warn',
-      `Matched "${match.plan.name}" but no phone in SMS`
+      'error',
+      `No execution SIM configured for ${network} — set it in Settings`
+    );
+
+    return;
+  }
+
+  const job = planFulfillment(toMsisdn(phone), amount);
+
+  if (!job) {
+    log(
+      'error',
+      `Invalid phone or amount for ref ${ref} (phone=${phone}, amount=${amount})`
     );
 
     return;
@@ -231,35 +260,30 @@ function handleSms(event: SmsReceivedPayload) {
 
   log(
     'success',
-    `Matched ${match.plan.name} → ${match.resolvedUssd} on Till subscription ${selectedSubscriptionId}`
+    `Decoded ${ref} → ${network} KES ${amount} to ${phone}. ${job.summary}`
   );
 
-  enqueueDial(
-    match.plan,
-    match.resolvedUssd,
-    match.payment.phone ?? undefined
-  );
+  enqueueDial({
+    network,
+    amount,
+    phone,
+    executionSubId,
+    dials: job.dials,
+    summary: job.summary,
+  });
 }
 
 /**
  * Add a USSD job to the queue.
  */
-function enqueueDial(
-  plan: DataPlan,
-  resolvedUssd: string,
-  customerPhone?: string
-) {
-  dialQueue.push({
-    plan,
-    resolvedUssd,
-    customerPhone,
-  });
+function enqueueDial(job: DialJob) {
+  dialQueue.push(job);
 
   useActivityStore
     .getState()
     .addLog(
       'info',
-      `${plan.name} added to USSD queue (${dialQueue.length} pending)`
+      `${job.summary} added to USSD queue (${dialQueue.length} pending)`
     );
 
   void processDialQueue();
@@ -283,11 +307,7 @@ async function processDialQueue() {
         continue;
       }
 
-      await autoDial(
-        job.plan,
-        job.resolvedUssd,
-        job.customerPhone
-      );
+      await autoDial(job);
     }
   } finally {
     processingQueue = false;
@@ -295,13 +315,9 @@ async function processDialQueue() {
 }
 
 /**
- * Automatically dial a USSD code.
+ * Automatically dial the USSD chunks for a decoded order.
  */
-async function autoDial(
-  plan: DataPlan,
-  resolvedUssd: string,
-  customerPhone?: string
-) {
+async function autoDial(job: DialJob) {
   const log = useActivityStore.getState().addLog;
 
   try {
@@ -329,57 +345,58 @@ async function autoDial(
       return;
     }
 
-    /**
-     * Get the SIM selected as the Till SIM.
-     */
-    const subId = useSimStore.getState().tillSubscriptionId;
+    let allOk = true;
+    let failReason = '';
 
-    if (subId == null || subId < 0) {
+    for (const dial of job.dials) {
       log(
-        'error',
-        'No Till SIM selected. Please select the SIM used for USSD delivery.'
+        'info',
+        `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`
       );
 
-      return;
-    }
+      const outcome = await dialWithTimeout(
+        dial.ussdCode,
+        job.executionSubId,
+        [],
+        30000
+      );
 
-    /**
-     * Dial the USSD code and wait for the result.
-     */
-    const outcome = await dialWithTimeout(
-      resolvedUssd,
-      subId,
-      plan.followUpInputs,
-      30000
-    );
+      if (!outcome.success) {
+        allOk = false;
+        failReason = `${dial.label} failed: ${outcome.result}`;
+        log('error', failReason);
+        break;
+      }
 
-    if (outcome.success) {
       log(
         'success',
-        `${plan.name} delivered: ${outcome.result || 'OK'}`
+        `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`
+      );
+    }
+
+    if (allOk) {
+      log(
+        'success',
+        `KES ${job.amount} delivered to ${job.phone} (${job.network})`
       );
 
-      if (customerPhone) {
-        await notifyWhatsApp({
-          to: customerPhone,
-          template: 'delivery_success',
-          planName: plan.name,
-        }).catch(() => {});
-      }
+      await notifyWhatsApp({
+        to: job.phone,
+        template: 'delivery_success',
+        planName: `${job.network} airtime KES ${job.amount}`,
+      }).catch(() => {});
     } else {
       log(
         'error',
-        `${plan.name} failed: ${outcome.result}`
+        `Delivery failed for ${job.phone} (${job.network} KES ${job.amount}): ${failReason}`
       );
 
-      if (customerPhone) {
-        await notifyWhatsApp({
-          to: customerPhone,
-          template: 'delivery_failed',
-          planName: plan.name,
-          reason: outcome.result,
-        }).catch(() => {});
-      }
+      await notifyWhatsApp({
+        to: job.phone,
+        template: 'delivery_failed',
+        planName: `${job.network} airtime KES ${job.amount}`,
+        reason: failReason,
+      }).catch(() => {});
     }
   } catch (e: any) {
     log(
@@ -460,10 +477,14 @@ function dialWithTimeout(
 }
 
 /**
- * Manual test dial from the UI.
+ * Manual test dial from the UI (e.g. a future USSD Console screen).
+ * Pass the subscriptionId to dial from explicitly — now that execution SIM
+ * is chosen per network (Safaricom/Airtel), there's no single "the" dial
+ * SIM to default to.
  */
 export async function manualDial(
   ussdCode: string,
+  subscriptionId: number,
   menuInputs: string[] = []
 ) {
   const callOk = await requestCallPermission();
@@ -478,15 +499,13 @@ export async function manualDial(
     throw new Error('Accessibility service not enabled');
   }
 
-  const subId = useSimStore.getState().tillSubscriptionId;
-
-  if (subId == null || subId < 0) {
-    throw new Error('No SIM selected for USSD dialing');
+  if (subscriptionId == null || subscriptionId < 0) {
+    throw new Error('No SIM specified for USSD dialing');
   }
 
   return dialWithTimeout(
     ussdCode,
-    subId,
+    subscriptionId,
     menuInputs,
     30000
   );
