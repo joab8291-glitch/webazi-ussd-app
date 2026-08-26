@@ -22,7 +22,6 @@ import {
   requestSmsPermissions,
   requestCallPermission,
 } from '@/services/smsAutomation';
-import { startPolling, stopPolling, isPolling } from '@/services/poller';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
 import { healthCheck } from '@/services/api';
 
@@ -34,9 +33,8 @@ export default function HomeScreen() {
   const { smsListening, tillSubscriptionId, availableSims } = useSimStore();
   const logs = useActivityStore((s) => s.logs);
   const clearLogs = useActivityStore((s) => s.clear);
-  const { transactions, refresh } = useTransactionStore();
+  const { transactions } = useTransactionStore();
 
-  const [pollOn, setPollOn] = useState(false);
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [a11yOk, setA11yOk] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -58,8 +56,7 @@ export default function HomeScreen() {
     } catch {
       setBackendOk(false);
     }
-    await refresh();
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
     bootstrap();
@@ -76,16 +73,6 @@ export default function HomeScreen() {
       stopSmsListening();
     } else {
       await startSmsListening();
-    }
-  };
-
-  const togglePoll = () => {
-    if (pollOn || isPolling()) {
-      stopPolling();
-      setPollOn(false);
-    } else {
-      startPolling(8000);
-      setPollOn(true);
     }
   };
 
@@ -144,14 +131,6 @@ export default function HomeScreen() {
           onToggle={toggleSms}
           colors={c}
         />
-        <Row
-          label="Backend poller"
-          hint="Pull pending STK transactions every 8s"
-          value={pollOn}
-          onToggle={togglePoll}
-          colors={c}
-        />
-
         <Pressable
           onPress={ensurePermissions}
           style={[styles.primaryBtn, { backgroundColor: c.tint }]}>
