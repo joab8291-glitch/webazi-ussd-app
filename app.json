@@ -1,72 +1,42 @@
 {
   "expo": {
-    "name": "Webazi",
-    "slug": "webazi-ussd-app",
+    "name": "Airtime Manager",
+    "slug": "airtime-manager",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/webazi_profile_photo.png",
-    "scheme": "webaziussdapp",
+    "icon": "./assets/images/icon.png",
+    "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-
     "ios": {
       "supportsTablet": true
     },
-
     "android": {
-      "package": "com.webazi.ussdapp",
       "adaptiveIcon": {
-        "backgroundColor": "#00A86B",
-        "foregroundImage": "./assets/images/webazi_profile_photo.png",
-        "backgroundImage": "./assets/images/webazi_profile_photo.png",
-        "monochromeImage": "./assets/images/webazi_profile_photo.png"
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "READ_SMS",
-        "RECEIVE_SMS",
-        "READ_PHONE_STATE",
-        "READ_PHONE_NUMBERS",
-        "CALL_PHONE",
-        "FOREGROUND_SERVICE",
-        "BIND_ACCESSIBILITY_SERVICE",
-        "SYSTEM_ALERT_WINDOW"
-      ]
+      "package": "com.anonymous.airtimemanager"
     },
-
     "web": {
+      "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-
     "plugins": [
       "expo-router",
-      "expo-dev-client",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/webazi_profile_photo.png",
+          "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#00A86B",
-          "dark": {
-            "backgroundColor": "#0B1F17"
-          }
+          "backgroundColor": "#ffffff"
         }
       ]
     ],
-
     "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
-    },
-
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "d7e00bcd-4c8b-498a-bdef-18c6dbe57663"
-      }
+      "typedRoutes": true
     }
   }
 }
