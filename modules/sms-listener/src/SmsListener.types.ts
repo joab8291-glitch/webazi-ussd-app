@@ -16,3 +16,12 @@ export type SimSlotInfo = {
   displayName: string | null;
   number: string | null;
 };
+
+/** A message returned by queryInboxSince() — the "missed messages" scan. */
+export type InboxMessage = {
+  id: string;
+  sender: string;
+  body: string;
+  subscriptionId: number;
+  timestamp: number;
+};
