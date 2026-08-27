@@ -20,10 +20,17 @@ import { useTransactionStore } from '../store/useTransactionStore';
 import type { DialResult, LocalTransaction } from '../store/useTransactionStore';
 import { useUnmatchedStore } from '../store/useUnmatchedStore';
 import { useAppSettingsStore } from '../store/useAppSettingsStore';
+import { useMessageLogStore } from '../store/useMessageLogStore';
+import type { MessageLogSource } from '../store/useMessageLogStore';
 
 import { notifyWhatsApp } from './whatsapp';
 
 let smsSubscription: EventSubscription | null = null;
+
+/** Resolves after `ms` milliseconds — used for the inter-dial delay. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type DialJob = {
   txnId: string;
@@ -128,6 +135,18 @@ export async function startSmsListening(): Promise<boolean> {
       handleSms
     );
 
+    // Requires a native rebuild — guarded so this still works against an
+    // older build of the sms-listener module.
+    if (typeof SmsListener.startForegroundService === 'function') {
+      try {
+        SmsListener.startForegroundService();
+      } catch (e: any) {
+        useActivityStore
+          .getState()
+          .addLog('warn', `Could not start foreground service: ${String(e?.message ?? e)}`);
+      }
+    }
+
     useSimStore.getState().setSmsListening(true);
 
     useActivityStore
@@ -158,6 +177,10 @@ export function stopSmsListening() {
     }
 
     SmsListener.stopListening();
+
+    if (typeof SmsListener.stopForegroundService === 'function') {
+      SmsListener.stopForegroundService();
+    }
   } catch {
     // Ignore cleanup errors.
   }
@@ -170,9 +193,37 @@ export function stopSmsListening() {
 }
 
 /**
- * Handle an incoming SMS.
+ * Handle a live incoming SMS from the native listener — thin wrapper
+ * around the shared processSmsPayload().
  */
 function handleSms(event: SmsReceivedPayload) {
+  processSmsPayload(
+    {
+      sender: event.sender,
+      body: event.body,
+      subscriptionId: event.subscriptionId,
+      timestamp: event.timestamp,
+    },
+    'live'
+  );
+}
+
+/**
+ * Core SMS → order decode pipeline. Shared by three entry points:
+ *  - handleSms()          live SMS via the native BroadcastReceiver
+ *  - scanMissedMessages() the on-launch inbox scan, for SMS that arrived
+ *                         while the app/process was killed
+ *  - rerunMessage()       manually reprocessing one entry from the
+ *                         MPESA Messages log, for debugging
+ *
+ * Every trusted-sender, Till-SIM message is written to the raw message
+ * log (useMessageLogStore) regardless of outcome, so the MPESA Messages
+ * screen shows the full picture — not just the ones that failed.
+ */
+export function processSmsPayload(
+  event: { sender: string; body: string; subscriptionId: number; timestamp: number },
+  source: MessageLogSource
+) {
   const log = useActivityStore.getState().addLog;
 
   const tillSubscriptionId = useSimStore.getState().tillSubscriptionId;
@@ -210,12 +261,29 @@ function handleSms(event: SmsReceivedPayload) {
     return;
   }
 
+  /**
+   * Verified Senders check — only parse SMS whose sender name matches one
+   * of the trusted senders (default: "MPESA"). Any Till-SIM message from
+   * something else — a spoofed/app-generated SMS, another app's alert —
+   * is dropped here, before it ever reaches the ref parser, and is not
+   * added to the message log (the log is for genuine Till-SIM traffic).
+   */
   const trustedSenders = useAppSettingsStore.getState().trustedSenders;
-  const sender = String(event.sender ?? '');
-  if (!trustedSenders.some((name) => sender.toLowerCase().includes(name.toLowerCase()))) {
-    log('warn', `Ignoring SMS from untrusted sender: ${sender}`);
+  const senderTrusted =
+    trustedSenders.length === 0 ||
+    trustedSenders.some((s) => event.sender.toLowerCase().includes(s.toLowerCase()));
+
+  if (!senderTrusted) {
+    log(
+      'warn',
+      `Ignoring SMS from untrusted sender "${event.sender}" — add it in Settings → Verified Senders if this is legitimate`
+    );
+
     return;
   }
+
+  const receivedAt = new Date(event.timestamp || Date.now()).toISOString();
+  const logMessage = useMessageLogStore.getState().addMessage;
 
   /**
    * Pull the account reference out of the SMS. If there isn't one, this
@@ -231,6 +299,15 @@ function handleSms(event: SmsReceivedPayload) {
       subscriptionId: event.subscriptionId,
       body: event.body,
       reason: 'no_ref',
+    });
+
+    logMessage({
+      sender: event.sender,
+      subscriptionId: event.subscriptionId,
+      body: event.body,
+      receivedAt,
+      status: 'no_ref',
+      source,
     });
 
     return;
@@ -252,10 +329,50 @@ function handleSms(event: SmsReceivedPayload) {
       ref,
     });
 
+    logMessage({
+      sender: event.sender,
+      subscriptionId: event.subscriptionId,
+      body: event.body,
+      receivedAt,
+      status: 'undecodable_ref',
+      ref,
+      source,
+    });
+
     return;
   }
 
   const { network, amount, phone } = decoded;
+  const receipt = extractReceipt(event.body);
+
+  /**
+   * Ref-dedupe — the same M-Pesa receipt can otherwise be processed twice
+   * (e.g. the live listener already queued it before the missed-messages
+   * scan also finds it, or a message is manually Rerun after it already
+   * succeeded). A receipt code is unique per M-Pesa transaction, so treat
+   * a matching existing order as the same payment and skip re-dialing.
+   */
+  if (receipt) {
+    const alreadyExists = useTransactionStore
+      .getState()
+      .transactions.some((t) => t.receipt === receipt);
+
+    if (alreadyExists) {
+      log('info', `Skipping duplicate — receipt ${receipt} already has an order`);
+
+      logMessage({
+        sender: event.sender,
+        subscriptionId: event.subscriptionId,
+        body: event.body,
+        receivedAt,
+        status: 'duplicate',
+        ref,
+        source,
+      });
+
+      return;
+    }
+  }
 
   /**
    * Execution SIM is chosen by network, independent of the Till SIM:
@@ -273,6 +390,16 @@ function handleSms(event: SmsReceivedPayload) {
       `No execution SIM configured for ${network} — set it in Settings`
     );
 
+    logMessage({
+      sender: event.sender,
+      subscriptionId: event.subscriptionId,
+      body: event.body,
+      receivedAt,
+      status: 'invalid',
+      ref,
+      source,
+    });
+
     return;
   }
 
@@ -284,6 +411,16 @@ function handleSms(event: SmsReceivedPayload) {
       `Invalid phone or amount for ref ${ref} (phone=${phone}, amount=${amount})`
     );
 
+    logMessage({
+      sender: event.sender,
+      subscriptionId: event.subscriptionId,
+      body: event.body,
+      receivedAt,
+      status: 'invalid',
+      ref,
+      source,
+    });
+
     return;
   }
 
@@ -292,14 +429,22 @@ function handleSms(event: SmsReceivedPayload) {
     `Decoded ${ref} → ${network} KES ${amount} to ${phone}. ${job.summary}`
   );
 
-  const receipt = extractReceipt(event.body);
-
   const txnId = useTransactionStore.getState().addPending({
     ref,
     receipt,
     network,
     phone,
     amount,
+  });
+
+  logMessage({
+    sender: event.sender,
+    subscriptionId: event.subscriptionId,
+    body: event.body,
+    receivedAt,
+    status: 'queued',
+    ref,
+    source,
   });
 
   enqueueDial({
@@ -311,6 +456,29 @@ function handleSms(event: SmsReceivedPayload) {
     dials: job.dials,
     summary: job.summary,
   });
+}
+
+/**
+ * Manually reprocess one entry from the MPESA Messages log — the
+ * "Rerun" button, for debugging when something silently failed. Goes
+ * through the exact same pipeline as a live SMS, including the
+ * duplicate-receipt check, so re-running an already-delivered message
+ * is a safe no-op.
+ */
+export function rerunMessage(entry: {
+  sender: string;
+  subscriptionId: number;
+  body: string;
+}) {
+  processSmsPayload(
+    {
+      sender: entry.sender,
+      body: entry.body,
+      subscriptionId: entry.subscriptionId,
+      timestamp: Date.now(),
+    },
+    'rerun'
+  );
 }
 
 /**
@@ -360,6 +528,9 @@ async function processDialQueue() {
 async function autoDial(job: DialJob) {
   const log = useActivityStore.getState().addLog;
   const txnStore = useTransactionStore.getState();
+  const settings = useAppSettingsStore.getState();
+
+  let wakeLockHeld = false;
 
   try {
     /**
@@ -370,6 +541,7 @@ async function autoDial(job: DialJob) {
     if (!callOk) {
       log('error', 'CALL_PHONE denied');
       txnStore.markFailed(job.txnId, 'CALL_PHONE permission denied');
+      scheduleAutoRetry(job);
       return;
     }
 
@@ -388,23 +560,80 @@ async function autoDial(job: DialJob) {
       return;
     }
 
+    /**
+     * Keep the screen on for the duration of this (possibly multi-chunk)
+     * dial. Requires a native rebuild — safe to call even on a build that
+     * doesn't have it yet, since it's guarded.
+     */
+    if (settings.keepScreenAwakeDuringDial && typeof UssdExecutor.acquireDialWakeLock === 'function') {
+      try {
+        UssdExecutor.acquireDialWakeLock();
+        wakeLockHeld = true;
+      } catch (e: any) {
+        log('warn', `Could not acquire wake lock: ${String(e?.message ?? e)}`);
+      }
+    }
+
     let allOk = true;
     let failReason = '';
-    const settings = useAppSettingsStore.getState();
-    if (settings.autoCloseUssdDialogs && typeof (UssdExecutor as any).closeLingeringUssdDialog === 'function') { try { (UssdExecutor as any).closeLingeringUssdDialog(); } catch {} }
-    if (settings.keepScreenAwakeDuringDial && typeof (UssdExecutor as any).acquireDialWakeLock === 'function') { try { (UssdExecutor as any).acquireDialWakeLock(); } catch {} }
-    try {
-      for (const dial of job.dials) {
-        log('info', `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`);
-        if (settings.autoCloseUssdDialogs && typeof (UssdExecutor as any).closeLingeringUssdDialog === 'function') { try { (UssdExecutor as any).closeLingeringUssdDialog(); } catch {} }
-        const outcome = await dialWithTimeout(dial.ussdCode, job.executionSubId, [], settings.ussdTimeoutMs);
-        const dialResult: DialResult = { ussdCode: dial.ussdCode, amount: dial.amount, success: outcome.success, result: outcome.result };
-        txnStore.recordDialResult(job.txnId, dialResult);
-        if (!outcome.success) { allOk=false; failReason=`${dial.label} failed: ${outcome.result}`; log('error',failReason); break; }
-        log('success', `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`);
+
+    for (const [dialIndex, dial] of job.dials.entries()) {
+      /**
+       * Transaction Processing Delay — a deliberate pause before every
+       * dial after the first. Orders over KES 10,000 get chunked into
+       * multiple back-to-back *140*10000*...# dials; firing them with no
+       * gap at all is likely to trip telco rate-limiting.
+       */
+      if (dialIndex > 0 && settings.interDialDelayMs > 0) {
+        await sleep(settings.interDialDelayMs);
       }
-    } finally {
-      if (settings.keepScreenAwakeDuringDial && typeof (UssdExecutor as any).releaseDialWakeLock === 'function') { try { (UssdExecutor as any).releaseDialWakeLock(); } catch {} }
+
+      /**
+       * Close any lingering USSD dialog before sending the next one —
+       * a common cause of "no response" is a stale dialog from a
+       * previous session still sitting on top. Requires a native
+       * rebuild; safe to call even if not yet present.
+       */
+      if (settings.autoCloseUssdDialogs && typeof UssdExecutor.closeLingeringUssdDialog === 'function') {
+        try {
+          UssdExecutor.closeLingeringUssdDialog();
+        } catch {
+          // Non-fatal — proceed with the dial regardless.
+        }
+      }
+
+      log(
+        'info',
+        `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`
+      );
+
+      const outcome = await dialWithTimeout(
+        dial.ussdCode,
+        job.executionSubId,
+        [],
+        settings.ussdTimeoutMs
+      );
+
+      const dialResult: DialResult = {
+        ussdCode: dial.ussdCode,
+        amount: dial.amount,
+        success: outcome.success,
+        result: outcome.result,
+      };
+
+      txnStore.recordDialResult(job.txnId, dialResult);
+
+      if (!outcome.success) {
+        allOk = false;
+        failReason = `${dial.label} failed: ${outcome.result}`;
+        log('error', failReason);
+        break;
+      }
+
+      log(
+        'success',
+        `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`
+      );
     }
 
     if (allOk) {
@@ -427,16 +656,6 @@ async function autoDial(job: DialJob) {
       );
 
       txnStore.markFailed(job.txnId, failReason);
-      if (settings.autoRetryEnabled) {
-        const current = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
-        if (current && current.attempts < 3) {
-          log('warn', `Scheduling automatic retry ${current.attempts + 1}/3 in ${Math.round(settings.autoRetryDelayMs / 1000)}s`);
-          setTimeout(() => {
-            const latest = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
-            if (latest && latest.attempts < 3) void retryDelivery(latest);
-          }, settings.autoRetryDelayMs);
-        }
-      }
 
       await notifyWhatsApp({
         to: job.phone,
@@ -444,6 +663,8 @@ async function autoDial(job: DialJob) {
         planName: `${job.network} airtime KES ${job.amount}`,
         reason: failReason,
       }).catch(() => {});
+
+      scheduleAutoRetry(job);
     }
   } catch (e: any) {
     const reason = String(e?.message ?? e);
@@ -451,7 +672,59 @@ async function autoDial(job: DialJob) {
     log('error', `autoDial error: ${reason}`);
 
     txnStore.markFailed(job.txnId, reason);
+
+    scheduleAutoRetry(job);
+  } finally {
+    if (wakeLockHeld && typeof UssdExecutor.releaseDialWakeLock === 'function') {
+      try {
+        UssdExecutor.releaseDialWakeLock();
+      } catch {
+        // Non-fatal.
+      }
+    }
   }
+}
+
+const AUTO_RETRY_MAX_ATTEMPTS = 3;
+
+/**
+ * If auto-retry is enabled in Settings, schedule another attempt for a
+ * failed order after the configured delay — capped at
+ * AUTO_RETRY_MAX_ATTEMPTS so a persistently failing order doesn't retry
+ * forever. Re-checks the transaction at fire time in case it was deleted,
+ * manually requeued, or resolved in the meantime.
+ */
+function scheduleAutoRetry(job: DialJob) {
+  const settings = useAppSettingsStore.getState();
+
+  if (!settings.autoRetryEnabled) {
+    return;
+  }
+
+  const txn = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
+
+  if (!txn || txn.status !== 'failed' || txn.attempts >= AUTO_RETRY_MAX_ATTEMPTS) {
+    return;
+  }
+
+  useActivityStore
+    .getState()
+    .addLog(
+      'info',
+      `Auto-retry scheduled for ${job.phone} in ${Math.round(settings.autoRetryDelayMs / 1000)}s (attempt ${
+        txn.attempts + 1
+      }/${AUTO_RETRY_MAX_ATTEMPTS})`
+    );
+
+  setTimeout(() => {
+    const latest = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
+
+    if (!latest || latest.status !== 'failed') {
+      return;
+    }
+
+    void retryDelivery(latest);
+  }, settings.autoRetryDelayMs);
 }
 
 /**
