@@ -1,4 +1,3 @@
-
 /**
  * SMS → decode account ref → dial Sambaza USSD automation.
  * Uses native SmsListener + UssdExecutor modules.
@@ -19,7 +18,8 @@ import { useSimStore } from '../store/useSimStore';
 import { useActivityStore } from '../store/useActivityStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import type { DialResult, LocalTransaction } from '../store/useTransactionStore';
-import { useUnmatchedStore } from '../store/useUnmatchedStoppSettingsStore } from '../store/useAppSettingsStore';
+import { useUnmatchedStore } from '../store/useUnmatchedStore';
+import { useAppSettingsStore } from '../store/useAppSettingsStore';
 
 import { notifyWhatsApp } from './whatsapp';
 
@@ -67,106 +67,14 @@ export async function requestCallPermission(): Promise<boolean> {
   }
 
   const granted = await PermissionsAndroid.request(
-    PermissionsAndroid.PERMISSIONS.CALL_PHONE, 
-              network,
-              phone,
-              amount,
-              deliveredAmount: 0,
-              status: 'pending',
-              dialResults: [],
-              failureReason: null,
-              attempts: 1,
-              createdAt: now,
-              updatedAt: now,
-            },
-            ...s.transactions,
-          ],
-        }));
-
-        return id;
-      },
-
-      recordDialResult: (id, dial) => {
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  dialResults: [...t.dialResults, dial],
-                  deliveredAmount: dial.success
-                    ? t.deliveredAmount + dial.amount
-                    : t.deliveredAmount,
-                  updatedAt: new Date().toISOString(),
-                }
-              : t
-          ),
-        }));
-      },
-
-      markCompleted: (id) => {
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  status: 'completed',
-                  failureReason: null,
-                  updatedAt: new Date().toISOString(),
-                }
-              : t
-          ),
-        }));
-      },
-
-      markFailed: (id, reason) => {
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  status: 'failed',
-                  failureReason: reason,
-                  updatedAt: new Date().toISOString(),
-                }
-              : t
-          ),
-        }));
-      },
-
-      bumpAttempts: (id) => {
-        set((s) => ({
-          transactions: s.transactions.map((t) =>
-            t.id === id ? { ...t, attempts: t.attempts + 1 } : t
-          ),
-        }));
-      },
-
-      deleteTransaction: (id) => {
-        set((s) => ({ transactions: s.transactions.filter((t) => t.id !== id) }));
-      },
-
-      purgeOlderThan: (days) => {
-        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-        set((s) => ({ transactions: s.transactions.filter((t) => t.status === 'pending' || new Date(t.createdAt).getTime() >= cutoff) }));
-      },
-    }),
+    PermissionsAndroid.PERMISSIONS.CALL_PHONE,
     {
-      name: 'webazi-transaction-store',
-
-      storage: {
-        getItem: async (name) => {
-          const value = await AsyncStorage.getItem(name);
-          return value ? JSON.parse(value) : null;
-        },
-
-        setItem: async (name, value) => {
-          await AsyncStorage.setItem(name, JSON.stringify(value));
-        },
-
-        removeItem: async (name) => {
-          await AsyncStorage.removeItem(name);
-        },
-     
+      title: 'Phone Call Permission',
+      message:
+        'Webazi needs permission to dial USSD codes for airtime delivery.',
+      buttonPositive: 'Allow',
+      buttonNegative: 'Deny',
+    }
   );
 
   return granted === PermissionsAndroid.RESULTS.GRANTED;
