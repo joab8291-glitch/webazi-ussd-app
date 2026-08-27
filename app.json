@@ -30,6 +30,8 @@
         "READ_PHONE_NUMBERS",
         "CALL_PHONE",
         "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_DATA_SYNC",
+        "POST_NOTIFICATIONS",
         "BIND_ACCESSIBILITY_SERVICE",
         "SYSTEM_ALERT_WINDOW",
         "WAKE_LOCK"
@@ -66,7 +68,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "9e90c3ef-5225-4cba-87d2-ae5acd47ff9c"
+        "projectId": "d7e00bcd-4c8b-498a-bdef-18c6dbe57663"
       }
     }
   }
