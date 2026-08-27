@@ -8,6 +8,8 @@
 
     <!-- Required to access PhoneAccount information on modern Android -->
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+
+    <!-- Required to keep the screen on during a multi-step USSD dial -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application>
