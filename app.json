@@ -1,42 +1,72 @@
 {
   "expo": {
-    "name": "Airtime Manager",
-    "slug": "airtime-manager",
+    "name": "Webazi",
+    "slug": "webazi-ussd-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "icon": "./assets/images/webazi_profile_photo.png",
+    "scheme": "webaziussdapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
     "ios": {
       "supportsTablet": true
     },
+
     "android": {
+      "package": "com.webazi.ussdapp",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#00A86B",
+        "foregroundImage": "./assets/images/webazi_profile_photo.png",
+        "backgroundImage": "./assets/images/webazi_profile_photo.png",
+        "monochromeImage": "./assets/images/webazi_profile_photo.png"
       },
-      "package": "com.anonymous.airtimemanager"
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "READ_SMS",
+        "RECEIVE_SMS",
+        "READ_PHONE_STATE",
+        "READ_PHONE_NUMBERS",
+        "CALL_PHONE",
+        "FOREGROUND_SERVICE",
+        "BIND_ACCESSIBILITY_SERVICE",
+        "SYSTEM_ALERT_WINDOW"
+      ]
     },
+
     "web": {
-      "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
+
     "plugins": [
       "expo-router",
+      "expo-dev-client",
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/webazi_profile_photo.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#00A86B",
+          "dark": {
+            "backgroundColor": "#0B1F17"
+          }
         }
       ]
     ],
+
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "d7e00bcd-4c8b-498a-bdef-18c6dbe57663"
+      }
     }
   }
 }
