@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.telecom.TelecomManager
 import android.telephony.SubscriptionManager
@@ -12,6 +13,10 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class UssdExecutorModule : Module() {
+
+  // Held between acquireDialWakeLock()/releaseDialWakeLock() calls so the
+  // screen stays on for the duration of a (possibly multi-chunk) dial.
+  private var dialWakeLock: PowerManager.WakeLock? = null
 
   override fun definition() = ModuleDefinition {
     Name("UssdExecutor")
@@ -52,9 +57,57 @@ class UssdExecutorModule : Module() {
       }
     }
 
-    Function("closeLingeringUssdDialog") { UssdAccessibilityService.dismissLingeringDialog() }
-    Function("acquireDialWakeLock") { UssdAccessibilityService.acquireDialWakeLock() }
-    Function("releaseDialWakeLock") { UssdAccessibilityService.releaseDialWakeLock() }
+    // Dismiss any lingering USSD dialog before starting a new dial — a
+    // common cause of "no response" is a stale dialog left over from a
+    // previous session. Safe to call even if nothing is showing.
+    Function("closeLingeringUssdDialog") {
+      UssdAccessibilityService.dismissLingeringDialog()
+    }
+
+    // Turn the screen on and keep it on for the duration of a dial.
+    // Some devices silently drop the accessibility events used to walk a
+    // multi-step USSD menu if the screen sleeps mid-session.
+    Function("acquireDialWakeLock") {
+      val context = appContext.reactContext ?: return@Function
+
+      try {
+        if (dialWakeLock?.isHeld == true) {
+          return@Function
+        }
+
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+
+        @Suppress("DEPRECATION")
+        val wakeLock = powerManager.newWakeLock(
+          PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+            PowerManager.ON_AFTER_RELEASE,
+          "Webazi::UssdDial"
+        )
+
+        // Safety timeout so a missed release() (e.g. app killed mid-dial)
+        // can't hold the screen on indefinitely.
+        wakeLock.acquire(5 * 60 * 1000L)
+
+        dialWakeLock = wakeLock
+      } catch (e: Exception) {
+        // Non-fatal — dialing continues without the wake lock.
+      }
+    }
+
+    Function("releaseDialWakeLock") {
+      try {
+        dialWakeLock?.let {
+          if (it.isHeld) {
+            it.release()
+          }
+        }
+      } catch (e: Exception) {
+        // Non-fatal.
+      } finally {
+        dialWakeLock = null
+      }
+    }
 
     // Dial USSD using the exact Android subscription ID selected by the user.
     Function("dialUssd") {
