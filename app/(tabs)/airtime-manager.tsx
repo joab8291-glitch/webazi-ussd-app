@@ -98,14 +98,14 @@ export default function AirtimeManagerScreen() {
 
   const handleShare = (txn: LocalTransaction) => {
     Share.share({
-      message: `Webazi order ${txn.ref} · KES ${txn.amount} · ${txn.phone} · ${txn.status}`,
+      message: `Webazi order ${txn.ref} Â· KES ${txn.amount} Â· ${txn.phone} Â· ${txn.status}`,
     }).catch(() => {});
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 8 }}>
       <Text style={[styles.title, { color: c.text, paddingHorizontal: 16 }]}>Airtime Manager</Text>
-      <Pressable onPress={() => router.push('/ussd-scheduler')} style={[styles.schedulerLink, { borderColor: c.border, backgroundColor: c.surface }]}><Text style={{ color: c.tint, fontWeight: '700' }}>USSD Scheduler →</Text></Pressable>
+      <Pressable onPress={() => router.push('/ussd-scheduler')} style={[styles.schedulerLink, { borderColor: c.border, backgroundColor: c.surface }]}><Text style={{ color: c.tint, fontWeight: '700' }}>USSD Scheduler â†’</Text></Pressable>
 
       {/* Network sub-tabs */}
       <View style={styles.subTabs}>
@@ -123,7 +123,7 @@ export default function AirtimeManagerScreen() {
                 {n.label}
               </Text>
               <Text style={{ color: selected ? '#fff' : c.muted, fontSize: 11 }}>
-                ref {n.refPrefix}…
+                ref {n.refPrefix}â€¦
               </Text>
             </Pressable>
           );
@@ -145,7 +145,7 @@ export default function AirtimeManagerScreen() {
               </Text>
               {availableSims.length === 0 && (
                 <Text style={{ color: c.muted, fontSize: 12 }}>
-                  No SIMs detected — refresh from Settings first.
+                  No SIMs detected â€” refresh from Settings first.
                 </Text>
               )}
               {availableSims.map((sim) => {
@@ -166,17 +166,17 @@ export default function AirtimeManagerScreen() {
                         {sim.carrierName || sim.displayName || `SIM ${sim.slotIndex}`}
                       </Text>
                       <Text style={{ color: c.textSecondary, fontSize: 12 }}>
-                        slot {sim.slotIndex} · sub {sim.subscriptionId}
-                        {sim.number ? ` · ${sim.number}` : ''}
+                        slot {sim.slotIndex} Â· sub {sim.subscriptionId}
+                        {sim.number ? ` Â· ${sim.number}` : ''}
                       </Text>
                     </View>
-                    {selected && <Text style={{ color: c.tint, fontWeight: '700' }}>✓</Text>}
+                    {selected && <Text style={{ color: c.tint, fontWeight: '700' }}>âœ“</Text>}
                   </Pressable>
                 );
               })}
               {executionSubId == null && availableSims.length > 0 && (
                 <Text style={{ color: c.warning, fontSize: 12 }}>
-                  No SIM selected — {activeNetwork.label} orders won't dial until you pick one.
+                  No SIM selected â€” {activeNetwork.label} orders won't dial until you pick one.
                 </Text>
               )}
             </View>
@@ -185,7 +185,7 @@ export default function AirtimeManagerScreen() {
             <TextInput
               value={search}
               onChangeText={setSearch}
-              placeholder="Search phone / ref / receipt…"
+              placeholder="Search phone / ref / receiptâ€¦"
               placeholderTextColor={c.muted}
               autoCapitalize="none"
               style={[
@@ -244,7 +244,7 @@ export default function AirtimeManagerScreen() {
               <View style={{ gap: 8 }}>
                 {unmatched.length === 0 ? (
                   <Text style={{ color: c.muted, fontSize: 12, paddingHorizontal: 2 }}>
-                    No unmatched SMS — every Till SMS decoded into an order.
+                    No unmatched SMS â€” every Till SMS decoded into an order.
                   </Text>
                 ) : (
                   unmatched.map((u) => (
@@ -320,7 +320,7 @@ function ManualDeliveryForm({
   return (
     <View style={[stylesManual.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
-        Trigger a {network} delivery directly — same queue, tracking and WhatsApp notifications as an
+        Trigger a {network} delivery directly â€” same queue, tracking and WhatsApp notifications as an
         SMS-triggered order.
       </Text>
       <TextInput
@@ -344,7 +344,7 @@ function ManualDeliveryForm({
         disabled={submitting}
         style={[stylesManual.btn, { backgroundColor: colors.tint, opacity: submitting ? 0.6 : 1 }]}>
         <Text style={{ color: '#fff', fontWeight: '700' }}>
-          {submitting ? 'Queuing…' : 'Deliver now'}
+          {submitting ? 'Queuingâ€¦' : 'Deliver now'}
         </Text>
       </Pressable>
     </View>
@@ -364,7 +364,7 @@ function UnmatchedCard({
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.cardTop}>
         <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>
-          {item.sender} · sub {item.subscriptionId}
+          {item.sender} Â· sub {item.subscriptionId}
         </Text>
         <Text style={{ color: colors.warning, fontSize: 11, fontWeight: '700' }}>
           {item.reason === 'no_ref' ? 'NO REF' : 'BAD REF'}
@@ -414,7 +414,7 @@ function TxnCard({
             </Text>
           </View>
           <Pressable onPress={() => setMenuOpen((v) => !v)} hitSlop={8}>
-            <Text style={{ color: colors.muted, fontSize: 18, fontWeight: '700' }}>⋮</Text>
+            <Text style={{ color: colors.muted, fontSize: 18, fontWeight: '700' }}>â‹®</Text>
           </Pressable>
         </View>
       </View>
@@ -454,7 +454,7 @@ function TxnCard({
         <Text style={{ color: colors.error, fontSize: 12 }}>{txn.failureReason}</Text>
       ) : null}
       <Text style={{ color: colors.muted, fontSize: 11 }}>
-        {new Date(txn.createdAt).toLocaleString()} · attempts {txn.attempts}
+        {new Date(txn.createdAt).toLocaleString()} Â· attempts {txn.attempts}
       </Text>
 
       <View style={styles.actions}>
@@ -489,10 +489,10 @@ function TxnCard({
                   fontSize: 11,
                   fontWeight: '700',
                 }}>
-                {d.success ? '✓' : '✕'} {d.ussdCode}
+                {d.success ? 'âœ“' : 'âœ•'} {d.ussdCode}
               </Text>
               <Text style={{ color: colors.muted, fontSize: 11 }}>
-                KES {d.amount} · {d.result || (d.success ? 'confirmed' : 'no response')}
+                KES {d.amount} Â· {d.result || (d.success ? 'confirmed' : 'no response')}
               </Text>
             </View>
           ))}

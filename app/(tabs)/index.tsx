@@ -106,7 +106,7 @@ export default function HomeScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
       <Text style={[styles.brand, { color: c.tint }]}>Webazi</Text>
       <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-        USSD data delivery · auto-fulfillment
+        USSD data delivery Â· auto-fulfillment
       </Text>
 
       {/* Status row */}
@@ -118,7 +118,7 @@ export default function HomeScreen() {
 
       {/* Stats */}
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <View style={styles.logHeader}><Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text><Pressable onPress={() => setStatsHidden(!statsHidden)}><Text style={{ color: c.tint, fontSize: 16 }}>{statsHidden ? '👁' : '🙈'}</Text></Pressable></View>
+        <View style={styles.logHeader}><Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text><Pressable onPress={() => setStatsHidden(!statsHidden)}><Text style={{ color: c.tint, fontSize: 16 }}>{statsHidden ? 'ðŸ‘' : 'ðŸ™ˆ'}</Text></Pressable></View>
         <View style={styles.statsRow}>
           <Stat label="Pending" value={pendingCount} color={c.warning} hidden={statsHidden} />
           <Stat label="Done" value={completedCount} color={c.success} hidden={statsHidden} />
@@ -146,7 +146,7 @@ export default function HomeScreen() {
         {availableSims.length > 0 && (
           <Text style={[styles.hint, { color: c.textSecondary }]}>
             SIMs: {availableSims.map((s) => s.carrierName || `slot ${s.slotIndex}`).join(', ')}{'\n'}
-            Till SIM: {tillSubscriptionId != null ? `sub ${tillSubscriptionId}` : 'not set — open Settings'}
+            Till SIM: {tillSubscriptionId != null ? `sub ${tillSubscriptionId}` : 'not set â€” open Settings'}
           </Text>
         )}
       </View>
@@ -178,7 +178,7 @@ export default function HomeScreen() {
                           : c.textSecondary,
                 },
               ]}>
-              {new Date(entry.timestamp).toLocaleTimeString()} · {entry.message}
+              {new Date(entry.timestamp).toLocaleTimeString()} Â· {entry.message}
             </Text>
           ))
         )}
@@ -216,7 +216,7 @@ function StatusChip({
 function Stat({ label, value, color, hidden }: { label: string; value: number; color: string; hidden?: boolean }) {
   return (
     <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{hidden ? '•••' : value}</Text>
+      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{hidden ? 'â€¢â€¢â€¢' : value}</Text>
       <Text style={{ fontSize: 12, color: '#687076' }}>{label}</Text>
     </View>
   );
