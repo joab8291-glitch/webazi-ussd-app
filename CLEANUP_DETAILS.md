@@ -1,3 +1,4 @@
+[Uploading CLEANUP_DETAILS.md…]()
 # Repository Cleanup - Files Removed
 
 This PR removes the following unused/legacy files from the repository:
