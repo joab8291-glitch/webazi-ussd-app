@@ -1,26 +1,45 @@
 import { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  Pressable,
+  TextInput,
+  Alert,
+  Share,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSimStore } from '@/store/useSimStore';
 import { useTransactionStore } from '@/store/useTransactionStore';
 import type { LocalTransaction } from '@/store/useTransactionStore';
-import { retryDelivery } from '@/services/smsAutomation';
+import { useUnmatchedStore } from '@/store/useUnmatchedStore';
+import type { UnmatchedSms } from '@/store/useUnmatchedStore';
+import { retryDelivery, manualDeliver } from '@/services/smsAutomation';
 import { openWhatsAppChat } from '@/services/whatsapp';
 
 type Network = 'safaricom' | 'airtel';
+type StatusFilter = 'all' | 'pending' | 'completed' | 'failed';
 
 const NETWORKS: { key: Network; label: string; refPrefix: string }[] = [
   { key: 'safaricom', label: 'Safaricom', refPrefix: 'S-' },
   { key: 'airtel', label: 'Airtel', refPrefix: 'A-' },
 ];
 
+const STATUS_FILTERS: StatusFilter[] = ['all', 'pending', 'completed', 'failed'];
+
 export default function AirtimeManagerScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const insets = useSafeAreaInsets();
   const [network, setNetwork] = useState<Network>('safaricom');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [search, setSearch] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(false);
+  const [showUnmatched, setShowUnmatched] = useState(false);
 
   const {
     availableSims,
@@ -31,14 +50,55 @@ export default function AirtimeManagerScreen() {
   } = useSimStore();
 
   const transactions = useTransactionStore((s) => s.transactions);
+  const deleteTransaction = useTransactionStore((s) => s.deleteTransaction);
+  const unmatched = useUnmatchedStore((s) => s.items);
+  const dismissUnmatched = useUnmatchedStore((s) => s.remove);
+
   const networkTxns = useMemo(
     () => transactions.filter((t) => t.network === network),
     [transactions, network]
   );
 
+  const counts = useMemo(
+    () => ({
+      all: networkTxns.length,
+      pending: networkTxns.filter((t) => t.status === 'pending').length,
+      completed: networkTxns.filter((t) => t.status === 'completed').length,
+      failed: networkTxns.filter((t) => t.status === 'failed').length,
+    }),
+    [networkTxns]
+  );
+
+  const visibleTxns = useMemo(() => {
+    let data = statusFilter === 'all' ? networkTxns : networkTxns.filter((t) => t.status === statusFilter);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      data = data.filter(
+        (t) =>
+          t.phone.toLowerCase().includes(q) ||
+          t.ref.toLowerCase().includes(q) ||
+          (t.receipt ?? '').toLowerCase().includes(q)
+      );
+    }
+    return data;
+  }, [networkTxns, statusFilter, search]);
+
   const executionSubId = network === 'safaricom' ? safaricomExecutionSubscriptionId : airtelExecutionSubscriptionId;
   const setExecutionSim = network === 'safaricom' ? setSafaricomExecutionSim : setAirtelExecutionSim;
   const activeNetwork = NETWORKS.find((n) => n.key === network)!;
+
+  const handleDelete = (txn: LocalTransaction) => {
+    Alert.alert('Delete order?', `KES ${txn.amount} to ${txn.phone} (${txn.ref})`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteTransaction(txn.id) },
+    ]);
+  };
+
+  const handleShare = (txn: LocalTransaction) => {
+    Share.share({
+      message: `Webazi order ${txn.ref} · KES ${txn.amount} · ${txn.phone} · ${txn.status}`,
+    }).catch(() => {});
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 8 }}>
@@ -54,10 +114,7 @@ export default function AirtimeManagerScreen() {
               onPress={() => setNetwork(n.key)}
               style={[
                 styles.subTabBtn,
-                {
-                  backgroundColor: selected ? c.tint : c.surface,
-                  borderColor: c.border,
-                },
+                { backgroundColor: selected ? c.tint : c.surface, borderColor: c.border },
               ]}>
               <Text style={{ color: selected ? '#fff' : c.textSecondary, fontWeight: '700' }}>
                 {n.label}
@@ -71,7 +128,7 @@ export default function AirtimeManagerScreen() {
       </View>
 
       <FlatList
-        data={networkTxns}
+        data={visibleTxns}
         keyExtractor={(item) => item.id}
         contentContainerStyle={{ padding: 16, gap: 10, paddingBottom: insets.bottom + 24 }}
         ListHeaderComponent={
@@ -121,6 +178,79 @@ export default function AirtimeManagerScreen() {
               )}
             </View>
 
+            {/* Search */}
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search phone / ref / receipt…"
+              placeholderTextColor={c.muted}
+              autoCapitalize="none"
+              style={[
+                styles.input,
+                { backgroundColor: c.surface, borderColor: c.border, color: c.text },
+              ]}
+            />
+
+            {/* Status filter chips with counts */}
+            <View style={styles.filters}>
+              {STATUS_FILTERS.map((f) => (
+                <Pressable
+                  key={f}
+                  onPress={() => setStatusFilter(f)}
+                  style={[
+                    styles.filterChip,
+                    {
+                      backgroundColor: statusFilter === f ? c.tint : c.surface,
+                      borderColor: c.border,
+                    },
+                  ]}>
+                  <Text
+                    style={{
+                      color: statusFilter === f ? '#fff' : c.textSecondary,
+                      fontSize: 12,
+                      fontWeight: '600',
+                      textTransform: 'capitalize',
+                    }}>
+                    {f} ({counts[f]})
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {/* Manual delivery */}
+            <Pressable
+              onPress={() => setShowManual((v) => !v)}
+              style={[styles.outlineBtn, { borderColor: c.border }]}>
+              <Text style={{ color: c.tint, fontWeight: '600' }}>
+                {showManual ? 'Hide manual delivery' : '+ Manual delivery'}
+              </Text>
+            </Pressable>
+            {showManual && (
+              <ManualDeliveryForm network={network} executionSubId={executionSubId} colors={c} />
+            )}
+
+            {/* Unmatched SMS */}
+            <Pressable
+              onPress={() => setShowUnmatched((v) => !v)}
+              style={[styles.outlineBtn, { borderColor: c.border }]}>
+              <Text style={{ color: c.tint, fontWeight: '600' }}>
+                {showUnmatched ? 'Hide unmatched' : `Unmatched SMS (${unmatched.length})`}
+              </Text>
+            </Pressable>
+            {showUnmatched && (
+              <View style={{ gap: 8 }}>
+                {unmatched.length === 0 ? (
+                  <Text style={{ color: c.muted, fontSize: 12, paddingHorizontal: 2 }}>
+                    No unmatched SMS — every Till SMS decoded into an order.
+                  </Text>
+                ) : (
+                  unmatched.map((u) => (
+                    <UnmatchedCard key={u.id} item={u} colors={c} onDismiss={() => dismissUnmatched(u.id)} />
+                  ))
+                )}
+              </View>
+            )}
+
             <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>
               {activeNetwork.label} orders
             </Text>
@@ -128,16 +258,145 @@ export default function AirtimeManagerScreen() {
         }
         ListEmptyComponent={
           <Text style={{ color: c.muted, textAlign: 'center', marginTop: 20 }}>
-            No {activeNetwork.label} orders yet
+            No {activeNetwork.label} orders match
           </Text>
         }
-        renderItem={({ item }) => <TxnCard txn={item} colors={c} />}
+        renderItem={({ item }) => (
+          <TxnCard
+            txn={item}
+            colors={c}
+            expanded={expandedId === item.id}
+            onToggleExpand={() => setExpandedId((id) => (id === item.id ? null : item.id))}
+            onDelete={() => handleDelete(item)}
+            onShare={() => handleShare(item)}
+          />
+        )}
       />
     </View>
   );
 }
 
-function TxnCard({ txn, colors }: { txn: LocalTransaction; colors: (typeof Colors)['light'] }) {
+function ManualDeliveryForm({
+  network,
+  executionSubId,
+  colors,
+}: {
+  network: Network;
+  executionSubId: number | null;
+  colors: (typeof Colors)['light'];
+}) {
+  const [phone, setPhone] = useState('');
+  const [amount, setAmount] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    const amt = Number(amount);
+    if (!phone.trim() || !Number.isFinite(amt) || amt <= 0) {
+      Alert.alert('Check the form', 'Enter a valid phone number and amount.');
+      return;
+    }
+    if (executionSubId == null) {
+      Alert.alert('No execution SIM', `Pick a ${network} execution SIM above first.`);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await manualDeliver({ phone: phone.trim(), amount: amt, network });
+      if (result.ok) {
+        setPhone('');
+        setAmount('');
+        Alert.alert('Queued', 'Manual delivery added to the dial queue.');
+      } else {
+        Alert.alert('Could not queue', result.reason ?? 'Unknown error');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <View style={[stylesManual.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 4 }}>
+        Trigger a {network} delivery directly — same queue, tracking and WhatsApp notifications as an
+        SMS-triggered order.
+      </Text>
+      <TextInput
+        value={phone}
+        onChangeText={setPhone}
+        placeholder="Phone (07XXXXXXXX)"
+        placeholderTextColor={colors.muted}
+        keyboardType="phone-pad"
+        style={[stylesManual.input, { borderColor: colors.border, color: colors.text }]}
+      />
+      <TextInput
+        value={amount}
+        onChangeText={setAmount}
+        placeholder="Amount (KES)"
+        placeholderTextColor={colors.muted}
+        keyboardType="numeric"
+        style={[stylesManual.input, { borderColor: colors.border, color: colors.text }]}
+      />
+      <Pressable
+        onPress={submit}
+        disabled={submitting}
+        style={[stylesManual.btn, { backgroundColor: colors.tint, opacity: submitting ? 0.6 : 1 }]}>
+        <Text style={{ color: '#fff', fontWeight: '700' }}>
+          {submitting ? 'Queuing…' : 'Deliver now'}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function UnmatchedCard({
+  item,
+  colors,
+  onDismiss,
+}: {
+  item: UnmatchedSms;
+  colors: (typeof Colors)['light'];
+  onDismiss: () => void;
+}) {
+  return (
+    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+      <View style={styles.cardTop}>
+        <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>
+          {item.sender} · sub {item.subscriptionId}
+        </Text>
+        <Text style={{ color: colors.warning, fontSize: 11, fontWeight: '700' }}>
+          {item.reason === 'no_ref' ? 'NO REF' : 'BAD REF'}
+        </Text>
+      </View>
+      {item.ref && <Text style={{ color: colors.muted, fontSize: 11 }}>Ref: {item.ref}</Text>}
+      <Text style={{ color: colors.textSecondary, fontSize: 12 }} numberOfLines={2}>
+        {item.bodyPreview}
+      </Text>
+      <Text style={{ color: colors.muted, fontSize: 11 }}>
+        {new Date(item.receivedAt).toLocaleString()}
+      </Text>
+      <Pressable onPress={onDismiss} style={[styles.actionBtn, { borderColor: colors.border, alignSelf: 'flex-start' }]}>
+        <Text style={{ color: colors.tint, fontSize: 12, fontWeight: '600' }}>Dismiss</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+function TxnCard({
+  txn,
+  colors,
+  expanded,
+  onToggleExpand,
+  onDelete,
+  onShare,
+}: {
+  txn: LocalTransaction;
+  colors: (typeof Colors)['light'];
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onDelete: () => void;
+  onShare: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const statusColor =
     txn.status === 'completed' ? colors.success : txn.status === 'failed' ? colors.error : colors.warning;
 
@@ -145,12 +404,39 @@ function TxnCard({ txn, colors }: { txn: LocalTransaction; colors: (typeof Color
     <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
       <View style={styles.cardTop}>
         <Text style={{ color: colors.text, fontWeight: '700' }}>KES {txn.amount}</Text>
-        <View style={[styles.badge, { backgroundColor: statusColor + '22' }]}>
-          <Text style={{ color: statusColor, fontSize: 11, fontWeight: '700' }}>
-            {txn.status.toUpperCase()}
-          </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={[styles.badge, { backgroundColor: statusColor + '22' }]}>
+            <Text style={{ color: statusColor, fontSize: 11, fontWeight: '700' }}>
+              {txn.status.toUpperCase()}
+            </Text>
+          </View>
+          <Pressable onPress={() => setMenuOpen((v) => !v)} hitSlop={8}>
+            <Text style={{ color: colors.muted, fontSize: 18, fontWeight: '700' }}>⋮</Text>
+          </Pressable>
         </View>
       </View>
+
+      {menuOpen && (
+        <View style={[styles.menu, { backgroundColor: colors.background, borderColor: colors.border }]}>
+          <Pressable
+            onPress={() => {
+              setMenuOpen(false);
+              onShare();
+            }}
+            style={styles.menuItem}>
+            <Text style={{ color: colors.text }}>Share ref</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setMenuOpen(false);
+              onDelete();
+            }}
+            style={styles.menuItem}>
+            <Text style={{ color: colors.error }}>Delete</Text>
+          </Pressable>
+        </View>
+      )}
+
       <Text style={{ color: colors.textSecondary, fontSize: 13 }}>{txn.phone}</Text>
       <Text style={{ color: colors.muted, fontSize: 11 }}>Ref: {txn.ref}</Text>
       {txn.receipt ? (
@@ -181,7 +467,34 @@ function TxnCard({ txn, colors }: { txn: LocalTransaction; colors: (typeof Color
             <Text style={{ color: colors.warning, fontSize: 12, fontWeight: '600' }}>Requeue</Text>
           </Pressable>
         )}
+        {txn.dialResults.length > 0 && (
+          <Pressable onPress={onToggleExpand} style={[styles.actionBtn, { borderColor: colors.border }]}>
+            <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>
+              {expanded ? 'Hide dial log' : `Dial log (${txn.dialResults.length})`}
+            </Text>
+          </Pressable>
+        )}
       </View>
+
+      {expanded && (
+        <View style={[styles.dialLog, { borderColor: colors.border }]}>
+          {txn.dialResults.map((d, i) => (
+            <View key={i} style={styles.dialLogRow}>
+              <Text
+                style={{
+                  color: d.success ? colors.success : colors.error,
+                  fontSize: 11,
+                  fontWeight: '700',
+                }}>
+                {d.success ? '✓' : '✕'} {d.ussdCode}
+              </Text>
+              <Text style={{ color: colors.muted, fontSize: 11 }}>
+                KES {d.amount} · {d.result || (d.success ? 'confirmed' : 'no response')}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -221,4 +534,49 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
+  input: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+  },
+  filters: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  outlineBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  menu: {
+    position: 'absolute',
+    top: 30,
+    right: 0,
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 4,
+    zIndex: 10,
+    elevation: 4,
+    minWidth: 110,
+  },
+  menuItem: { paddingHorizontal: 14, paddingVertical: 8 },
+  dialLog: {
+    borderTopWidth: 1,
+    marginTop: 6,
+    paddingTop: 6,
+    gap: 4,
+  },
+  dialLogRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 },
+});
+
+const stylesManual = StyleSheet.create({
+  card: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 8 },
+  input: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13 },
+  btn: { borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
 });
