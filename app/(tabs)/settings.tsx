@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -19,11 +20,18 @@ import { manualDial } from '@/services/smsAutomation';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
 import { WHATSAPP_WEBHOOK_NOTES } from '@/services/whatsapp';
 import { useActivityStore } from '@/store/useActivityStore';
+import { useAppSettingsStore } from '@/store/useAppSettingsStore';
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const settings = useAppSettingsStore();
+  const [senderInput, setSenderInput] = useState('');
+  const [timeoutInput, setTimeoutInput] = useState(String(settings.ussdTimeoutMs / 1000));
+  const [retryInput, setRetryInput] = useState(String(settings.autoRetryDelayMs / 1000));
+  const [deleteInput, setDeleteInput] = useState(settings.autoDeleteDays == null ? '' : String(settings.autoDeleteDays));
 
   const { availableSims, tillSubscriptionId, setTillSim } = useSimStore();
   const wa = useWhatsAppStore();
@@ -144,6 +152,20 @@ export default function SettingsScreen() {
           style={[styles.primaryBtn, { backgroundColor: c.tint }]}>
           <Text style={styles.primaryBtnText}>Dial now</Text>
         </Pressable>
+      </Section>
+
+      <Section title="USSD settings" colors={c}>
+        <Text style={{ color: c.textSecondary, fontSize: 12 }}>Trusted sender names are checked before automatic SMS fulfillment. Default: MPESA.</Text>
+        <View style={styles.senderRow}><TextInput value={senderInput} onChangeText={setSenderInput} placeholder="MPESA" placeholderTextColor={c.muted} style={[styles.input, { flex: 1, backgroundColor: c.background, borderColor: c.border, color: c.text }]} /><Pressable onPress={() => { settings.addTrustedSender(senderInput); setSenderInput(''); }} style={[styles.smallBtn, { backgroundColor: c.tint }]}><Text style={styles.primaryBtnText}>Add</Text></Pressable></View>
+        {settings.trustedSenders.map((sender) => <View key={sender} style={[styles.senderChip, { borderColor: c.border }]}><Text style={{ color: c.text, flex: 1 }}>{sender}</Text><Pressable onPress={() => settings.removeTrustedSender(sender)}><Text style={{ color: c.error, fontWeight: '700' }}>Remove</Text></Pressable></View>)}
+        <ToggleRow label="Auto-close lingering USSD dialogs" value={settings.autoCloseUssdDialogs} onChange={settings.setAutoCloseUssdDialogs} colors={c} />
+        <ToggleRow label="Keep screen awake during USSD" value={settings.keepScreenAwakeDuringDial} onChange={settings.setKeepScreenAwakeDuringDial} colors={c} />
+        <ToggleRow label="Auto-retry failed deliveries (max 3 attempts)" value={settings.autoRetryEnabled} onChange={settings.setAutoRetryEnabled} colors={c} />
+        <Text style={[styles.label, { color: c.textSecondary }]}>USSD timeout (seconds)</Text><TextInput value={timeoutInput} onChangeText={setTimeoutInput} onBlur={() => { const n=Number(timeoutInput); if(Number.isFinite(n)) settings.setUssdTimeoutMs(n*1000); }} keyboardType="numeric" style={[styles.input,{backgroundColor:c.background,borderColor:c.border,color:c.text}]} />
+        <Text style={[styles.label, { color: c.textSecondary }]}>Retry delay (seconds)</Text><TextInput value={retryInput} onChangeText={setRetryInput} onBlur={() => { const n=Number(retryInput); if(Number.isFinite(n)) settings.setAutoRetryDelayMs(n*1000); }} keyboardType="numeric" style={[styles.input,{backgroundColor:c.background,borderColor:c.border,color:c.text}]} />
+        <Text style={[styles.label, { color: c.textSecondary }]}>Auto-delete resolved orders after days (blank = never)</Text><TextInput value={deleteInput} onChangeText={setDeleteInput} onBlur={() => { const n=Number(deleteInput); settings.setAutoDeleteDays(deleteInput.trim() && Number.isFinite(n) && n>0 ? n : null); }} keyboardType="numeric" style={[styles.input,{backgroundColor:c.background,borderColor:c.border,color:c.text}]} />
+        {settings.autoDeleteLastRunAt && <Text style={{color:c.muted,fontSize:11}}>Last run: {new Date(settings.autoDeleteLastRunAt).toLocaleString()}</Text>}
+        <Pressable onPress={() => router.push('/ussd-scheduler')} style={[styles.outlineBtn,{borderColor:c.border}]}><Text style={{color:c.tint,fontWeight:'700'}}>Open USSD Scheduler</Text></Pressable>
       </Section>
 
       {/* WhatsApp */}
@@ -280,4 +302,5 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 12, fontWeight: '600' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  senderRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, senderChip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 10 }, smallBtn: { borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11 },
 });
