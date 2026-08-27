@@ -126,8 +126,12 @@ export default function SettingsScreen() {
         />
         <Pressable
           onPress={async () => {
+            if (tillSubscriptionId == null) {
+              Alert.alert('No SIM selected', 'Pick a Till / fulfillment SIM above first.');
+              return;
+            }
             try {
-              const result = await manualDial(testCode);
+              const result = await manualDial(testCode, tillSubscriptionId);
               log(
                 result.success ? 'success' : 'error',
                 `Manual dial: ${result.result || (result.success ? 'OK' : 'failed')}`
