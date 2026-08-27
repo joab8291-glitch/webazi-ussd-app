@@ -1,2 +1,27 @@
-<manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required to read/receive the Till SIM's incoming M-Pesa SMS -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+
+    <!-- Required to keep the SMS listener alive while the app is backgrounded -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Required to show the persistent "listener active" notification on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application>
+
+        <!-- Foreground service that keeps startListening()'s BroadcastReceiver
+             alive in the background so a payment SMS isn't silently dropped
+             when Android kills the backgrounded process. -->
+        <service
+            android:name=".SmsForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"
+            android:label="Webazi SMS Listener" />
+
+    </application>
+
 </manifest>
