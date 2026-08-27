@@ -31,7 +31,8 @@
         "CALL_PHONE",
         "FOREGROUND_SERVICE",
         "BIND_ACCESSIBILITY_SERVICE",
-        "SYSTEM_ALERT_WINDOW"
+        "SYSTEM_ALERT_WINDOW",
+        "WAKE_LOCK"
       ]
     },
 
