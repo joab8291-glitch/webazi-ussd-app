@@ -2,14 +2,22 @@ package expo.modules.ussdexecutor
 
 import android.accessibilityservice.AccessibilityService
 import android.os.Bundle
+import android.os.PowerManager
 import android.util.Log
+import android.content.Context
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityEvent
 
 class UssdAccessibilityService : AccessibilityService() {
 
+  private var wakeLock: PowerManager.WakeLock? = null
+
+  override fun onServiceConnected() { super.onServiceConnected(); instance = this }
+  override fun onDestroy() { releaseDialWakeLock(); if (instance === this) instance = null; super.onDestroy() }
+
   companion object {
     private const val TAG = "UssdAccessibility"
+    @Volatile private var instance: UssdAccessibilityService? = null
 
     @Volatile
     var pendingInputs: MutableList<String> = mutableListOf()
@@ -42,6 +50,16 @@ class UssdAccessibilityService : AccessibilityService() {
 
       Log.d(TAG, "USSD request cancelled")
     }
+
+    fun dismissLingeringDialog() {
+      val service = instance ?: return
+      try { service.rootInActiveWindow?.let { root -> service.findDismissButton(root)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) } } catch (e: Exception) { Log.w(TAG, "Could not dismiss lingering USSD dialog: ${e.message}") }
+    }
+    fun acquireDialWakeLock() {
+      val service = instance ?: return
+      try { val pm = service.getSystemService(Context.POWER_SERVICE) as PowerManager; if (service.wakeLock?.isHeld == true) return; service.wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Webazi:USSDDial"); service.wakeLock?.setReferenceCounted(false); service.wakeLock?.acquire(5 * 60 * 1000L) } catch (e: Exception) { Log.w(TAG, "Could not acquire wake lock: ${e.message}") }
+    }
+    fun releaseDialWakeLock() { try { instance?.wakeLock?.let { if (it.isHeld) it.release() }; instance?.wakeLock = null } catch (e: Exception) { Log.w(TAG, "Could not release wake lock: ${e.message}") } }
   }
 
   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -333,6 +351,15 @@ class UssdAccessibilityService : AccessibilityService() {
       }
     }
 
+    return null
+  }
+
+  private fun findDismissButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+    val text = node.text?.toString()?.trim()?.lowercase() ?: ""
+    val className = node.className?.toString()?.lowercase() ?: ""
+    val dismissText = setOf("close", "cancel", "dismiss", "ok", "done", "end", "hang up")
+    if (node.isClickable && (text in dismissText || (className.contains("button") && text.isNotBlank()))) return node
+    for (i in 0 until node.childCount) { try { node.getChild(i)?.let { findDismissButton(it)?.let { found -> return found } } } catch (_: Exception) {} }
     return null
   }
 

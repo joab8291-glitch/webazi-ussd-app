@@ -1,0 +1,518 @@
+diff --git a/app.json b/app.json
+index 3d73aff..d217fda 100644
+--- a/app.json
++++ b/app.json
+@@ -31,7 +31,8 @@
+         "CALL_PHONE",
+         "FOREGROUND_SERVICE",
+         "BIND_ACCESSIBILITY_SERVICE",
+-        "SYSTEM_ALERT_WINDOW"
++        "SYSTEM_ALERT_WINDOW",
++        "WAKE_LOCK"
+       ]
+     },
+ 
+diff --git a/app/(tabs)/_layout.tsx b/app/(tabs)/_layout.tsx
+index c325b5c..a551ca6 100644
+--- a/app/(tabs)/_layout.tsx
++++ b/app/(tabs)/_layout.tsx
+@@ -50,6 +50,7 @@ export default function TabLayout() {
+           tabBarIcon: ({ color }) => <IconSymbol size={26} name="gearshape.fill" color={color} />,
+         }}
+       />
++      <Tabs.Screen name="ussd-scheduler" options={{ href: null, title: 'USSD Scheduler' }} />
+       {/* Hide old explore template */}
+       <Tabs.Screen name="explore" options={{ href: null }} />
+     </Tabs>
+diff --git a/app/(tabs)/airtime-manager.tsx b/app/(tabs)/airtime-manager.tsx
+index 29df789..de72bf3 100644
+--- a/app/(tabs)/airtime-manager.tsx
++++ b/app/(tabs)/airtime-manager.tsx
+@@ -1,4 +1,5 @@
+ import { useMemo, useState } from 'react';
++import { useRouter } from 'expo-router';
+ import {
+   View,
+   Text,
+@@ -34,6 +35,7 @@ export default function AirtimeManagerScreen() {
+   const scheme = useColorScheme() ?? 'light';
+   const c = Colors[scheme];
+   const insets = useSafeAreaInsets();
++  const router = useRouter();
+   const [network, setNetwork] = useState<Network>('safaricom');
+   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+   const [search, setSearch] = useState('');
+@@ -103,6 +105,7 @@ export default function AirtimeManagerScreen() {
+   return (
+     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 8 }}>
+       <Text style={[styles.title, { color: c.text, paddingHorizontal: 16 }]}>Airtime Manager</Text>
++      <Pressable onPress={() => router.push('/ussd-scheduler')} style={[styles.schedulerLink, { borderColor: c.border, backgroundColor: c.surface }]}><Text style={{ color: c.tint, fontWeight: '700' }}>USSD Scheduler →</Text></Pressable>
+ 
+       {/* Network sub-tabs */}
+       <View style={styles.subTabs}>
+@@ -500,6 +503,7 @@ function TxnCard({
+ }
+ 
+ const styles = StyleSheet.create({
++  schedulerLink: { marginHorizontal: 16, marginTop: 8, borderWidth: 1, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
+   title: { fontSize: 24, fontWeight: '800', marginBottom: 8 },
+   subTabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 4 },
+   subTabBtn: {
+diff --git a/app/(tabs)/index.tsx b/app/(tabs)/index.tsx
+index 9b8b67a..ef751eb 100644
+--- a/app/(tabs)/index.tsx
++++ b/app/(tabs)/index.tsx
+@@ -24,6 +24,8 @@ import {
+ } from '@/services/smsAutomation';
+ import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
+ import { healthCheck } from '@/services/api';
++import { useAppSettingsStore } from '@/store/useAppSettingsStore';
++import { startSchedulerLoop, stopSchedulerLoop } from '@/services/scheduler';
+ 
+ export default function HomeScreen() {
+   const scheme = useColorScheme() ?? 'light';
+@@ -33,7 +35,11 @@ export default function HomeScreen() {
+   const { smsListening, tillSubscriptionId, availableSims } = useSimStore();
+   const logs = useActivityStore((s) => s.logs);
+   const clearLogs = useActivityStore((s) => s.clear);
+-  const { transactions } = useTransactionStore();
++  const { transactions, purgeOlderThan } = useTransactionStore();
++  const statsHidden = useAppSettingsStore((s) => s.statsHidden);
++  const setStatsHidden = useAppSettingsStore((s) => s.setStatsHidden);
++  const autoDeleteDays = useAppSettingsStore((s) => s.autoDeleteDays);
++  const setAutoDeleteLastRunAt = useAppSettingsStore((s) => s.setAutoDeleteLastRunAt);
+ 
+   const [backendOk, setBackendOk] = useState<boolean | null>(null);
+   const [a11yOk, setA11yOk] = useState<boolean | null>(null);
+@@ -45,6 +51,7 @@ export default function HomeScreen() {
+ 
+   const bootstrap = useCallback(async () => {
+     refreshSimSlots();
++    if (autoDeleteDays) { purgeOlderThan(autoDeleteDays); setAutoDeleteLastRunAt(new Date().toISOString()); }
+     try {
+       setA11yOk(UssdExecutor.isAccessibilityEnabled());
+     } catch {
+@@ -56,11 +63,10 @@ export default function HomeScreen() {
+     } catch {
+       setBackendOk(false);
+     }
+-  }, []);
++  }, [autoDeleteDays, purgeOlderThan, setAutoDeleteLastRunAt]);
+ 
+-  useEffect(() => {
+-    bootstrap();
+-  }, [bootstrap]);
++  useEffect(() => { bootstrap(); }, [bootstrap]);
++  useEffect(() => { startSchedulerLoop(); return () => stopSchedulerLoop(); }, []);
+ 
+   const onRefresh = async () => {
+     setRefreshing(true);
+@@ -112,11 +118,11 @@ export default function HomeScreen() {
+ 
+       {/* Stats */}
+       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+-        <Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text>
++        <View style={styles.logHeader}><Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text><Pressable onPress={() => setStatsHidden(!statsHidden)}><Text style={{ color: c.tint, fontSize: 16 }}>{statsHidden ? '👁' : '🙈'}</Text></Pressable></View>
+         <View style={styles.statsRow}>
+-          <Stat label="Pending" value={pendingCount} color={c.warning} />
+-          <Stat label="Done" value={completedCount} color={c.success} />
+-          <Stat label="Failed" value={failedCount} color={c.error} />
++          <Stat label="Pending" value={pendingCount} color={c.warning} hidden={statsHidden} />
++          <Stat label="Done" value={completedCount} color={c.success} hidden={statsHidden} />
++          <Stat label="Failed" value={failedCount} color={c.error} hidden={statsHidden} />
+         </View>
+       </View>
+ 
+@@ -207,10 +213,10 @@ function StatusChip({
+   );
+ }
+ 
+-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
++function Stat({ label, value, color, hidden }: { label: string; value: number; color: string; hidden?: boolean }) {
+   return (
+     <View style={{ alignItems: 'center', flex: 1 }}>
+-      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{value}</Text>
++      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{hidden ? '•••' : value}</Text>
+       <Text style={{ fontSize: 12, color: '#687076' }}>{label}</Text>
+     </View>
+   );
+diff --git a/app/(tabs)/settings.tsx b/app/(tabs)/settings.tsx
+index bda41e1..0cf4a65 100644
+--- a/app/(tabs)/settings.tsx
++++ b/app/(tabs)/settings.tsx
+@@ -1,4 +1,5 @@
+ import { useEffect, useState } from 'react';
++import { useRouter } from 'expo-router';
+ import {
+   View,
+   Text,
+@@ -19,11 +20,18 @@ import { manualDial } from '@/services/smsAutomation';
+ import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
+ import { WHATSAPP_WEBHOOK_NOTES } from '@/services/whatsapp';
+ import { useActivityStore } from '@/store/useActivityStore';
++import { useAppSettingsStore } from '@/store/useAppSettingsStore';
+ 
+ export default function SettingsScreen() {
+   const scheme = useColorScheme() ?? 'light';
+   const c = Colors[scheme];
+   const insets = useSafeAreaInsets();
++  const router = useRouter();
++  const settings = useAppSettingsStore();
++  const [senderInput, setSenderInput] = useState('');
++  const [timeoutInput, setTimeoutInput] = useState(String(settings.ussdTimeoutMs / 1000));
++  const [retryInput, setRetryInput] = useState(String(settings.autoRetryDelayMs / 1000));
++  const [deleteInput, setDeleteInput] = useState(settings.autoDeleteDays == null ? '' : String(settings.autoDeleteDays));
+ 
+   const { availableSims, tillSubscriptionId, setTillSim } = useSimStore();
+   const wa = useWhatsAppStore();
+@@ -146,6 +154,20 @@ export default function SettingsScreen() {
+         </Pressable>
+       </Section>
+ 
++      <Section title="USSD settings" colors={c}>
++        <Text style={{ color: c.textSecondary, fontSize: 12 }}>Trusted sender names are checked before automatic SMS fulfillment. Default: MPESA.</Text>
++        <View style={styles.senderRow}><TextInput value={senderInput} onChangeText={setSenderInput} placeholder="MPESA" placeholderTextColor={c.muted} style={[styles.input, { flex: 1, backgroundColor: c.background, borderColor: c.border, color: c.text }]} /><Pressable onPress={() => { settings.addTrustedSender(senderInput); setSenderInput(''); }} style={[styles.smallBtn, { backgroundColor: c.tint }]}><Text style={styles.primaryBtnText}>Add</Text></Pressable></View>
++        {settings.trustedSenders.map((sender) => <View key={sender} style={[styles.senderChip, { borderColor: c.border }]}><Text style={{ color: c.text, flex: 1 }}>{sender}</Text><Pressable onPress={() => settings.removeTrustedSender(sender)}><Text style={{ color: c.error, fontWeight: '700' }}>Remove</Text></Pressable></View>)}
++        <ToggleRow label="Auto-close lingering USSD dialogs" value={settings.autoCloseUssdDialogs} onChange={settings.setAutoCloseUssdDialogs} colors={c} />
++        <ToggleRow label="Keep screen awake during USSD" value={settings.keepScreenAwakeDuringDial} onChange={settings.setKeepScreenAwakeDuringDial} colors={c} />
++        <ToggleRow label="Auto-retry failed deliveries (max 3 attempts)" value={settings.autoRetryEnabled} onChange={settings.setAutoRetryEnabled} colors={c} />
++        <Text style={[styles.label, { color: c.textSecondary }]}>USSD timeout (seconds)</Text><TextInput value={timeoutInput} onChangeText={setTimeoutInput} onBlur={() => { const n=Number(timeoutInput); if(Number.isFinite(n)) settings.setUssdTimeoutMs(n*1000); }} keyboardType="numeric" style={[styles.input,{backgroundColor:c.background,borderColor:c.border,color:c.text}]} />
++        <Text style={[styles.label, { color: c.textSecondary }]}>Retry delay (seconds)</Text><TextInput value={retryInput} onChangeText={setRetryInput} onBlur={() => { const n=Number(retryInput); if(Number.isFinite(n)) settings.setAutoRetryDelayMs(n*1000); }} keyboardType="numeric" style={[styles.input,{backgroundColor:c.background,borderColor:c.border,color:c.text}]} />
++        <Text style={[styles.label, { color: c.textSecondary }]}>Auto-delete resolved orders after days (blank = never)</Text><TextInput value={deleteInput} onChangeText={setDeleteInput} onBlur={() => { const n=Number(deleteInput); settings.setAutoDeleteDays(deleteInput.trim() && Number.isFinite(n) && n>0 ? n : null); }} keyboardType="numeric" style={[styles.input,{backgroundColor:c.background,borderColor:c.border,color:c.text}]} />
++        {settings.autoDeleteLastRunAt && <Text style={{color:c.muted,fontSize:11}}>Last run: {new Date(settings.autoDeleteLastRunAt).toLocaleString()}</Text>}
++        <Pressable onPress={() => router.push('/ussd-scheduler')} style={[styles.outlineBtn,{borderColor:c.border}]}><Text style={{color:c.tint,fontWeight:'700'}}>Open USSD Scheduler</Text></Pressable>
++      </Section>
++
+       {/* WhatsApp */}
+       <Section title="WhatsApp notifications" colors={c}>
+         <Text style={{ color: c.textSecondary, fontSize: 13, marginBottom: 8 }}>
+@@ -280,4 +302,5 @@ const styles = StyleSheet.create({
+   },
+   label: { fontSize: 12, fontWeight: '600' },
+   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
++  senderRow: { flexDirection: 'row', gap: 8, alignItems: 'center' }, senderChip: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderRadius: 10, padding: 10 }, smallBtn: { borderRadius: 10, paddingHorizontal: 16, paddingVertical: 11 },
+ });
+diff --git a/app/(tabs)/ussd-scheduler.tsx b/app/(tabs)/ussd-scheduler.tsx
+new file mode 100644
+index 0000000..5ed6194
+--- /dev/null
++++ b/app/(tabs)/ussd-scheduler.tsx
+@@ -0,0 +1,9 @@
++import { useMemo, useState } from 'react';
++import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
++import { useRouter } from 'expo-router';
++import { useSafeAreaInsets } from 'react-native-safe-area-context';
++import { Colors } from '@/constants/theme';
++import { useColorScheme } from '@/hooks/use-color-scheme';
++import { useScheduleStore, type ScheduleRecurrence } from '@/store/useScheduleStore';
++export default function UssdSchedulerScreen(){const c=Colors[useColorScheme()??'light'];const insets=useSafeAreaInsets();const router=useRouter();const {items,addSchedule,removeSchedule,setActive}=useScheduleStore();const [label,setLabel]=useState('Scheduled delivery'),[phone,setPhone]=useState(''),[amount,setAmount]=useState(''),[network,setNetwork]=useState<'safaricom'|'airtel'>('safaricom'),[runAt,setRunAt]=useState(new Date(Date.now()+300000).toISOString()),[recurrence,setRecurrence]=useState<ScheduleRecurrence>('once'),[limit,setLimit]=useState('');const sorted=useMemo(()=>[...items].sort((a,b)=>a.runAt.localeCompare(b.runAt)),[items]);const add=()=>{const amt=Number(amount),d=new Date(runAt),lim=limit.trim()?Number(limit):null;if(!label.trim()||!phone.trim()||!Number.isFinite(amt)||amt<=0||Number.isNaN(d.getTime()))return Alert.alert('Check the form','Enter label, phone, amount and a valid ISO date/time.');if(lim!=null&&(!Number.isInteger(lim)||lim<=0))return Alert.alert('Check the limit','Run limit must be a positive whole number.');addSchedule({label:label.trim(),phone:phone.trim(),amount:amt,network,runAt:d.toISOString(),recurrence,limit:lim});setPhone('');setAmount('');Alert.alert('Scheduled','Saved. The scheduler checks every 30 seconds while the app is open.');};return <ScrollView style={{flex:1,backgroundColor:c.background}} contentContainerStyle={{paddingTop:insets.top+12,paddingBottom:insets.bottom+32,paddingHorizontal:16,gap:14}}><View style={s.header}><Pressable onPress={()=>router.back()}><Text style={{color:c.tint,fontWeight:'700'}}>‹ Back</Text></Pressable><Text style={[s.title,{color:c.text}]}>USSD Scheduler</Text><View style={{width:50}}/></View><View style={[s.card,{backgroundColor:c.surface,borderColor:c.border}]}><Text style={{color:c.textSecondary,fontSize:12}}>Schedules are local and run while Webazi is open. Overdue schedules run when the app is reopened.</Text><TextInput value={label} onChangeText={setLabel} placeholder="Label" placeholderTextColor={c.muted} style={[s.input,{borderColor:c.border,color:c.text,backgroundColor:c.background}]}/><TextInput value={phone} onChangeText={setPhone} placeholder="Phone (07XXXXXXXX)" placeholderTextColor={c.muted} keyboardType="phone-pad" style={[s.input,{borderColor:c.border,color:c.text,backgroundColor:c.background}]}/><TextInput value={amount} onChangeText={setAmount} placeholder="Amount (KES)" placeholderTextColor={c.muted} keyboardType="numeric" style={[s.input,{borderColor:c.border,color:c.text,backgroundColor:c.background}]}/><TextInput value={runAt} onChangeText={setRunAt} placeholder="2026-08-27T18:30:00" placeholderTextColor={c.muted} style={[s.input,{borderColor:c.border,color:c.text,backgroundColor:c.background}]}/><View style={s.row}>{(['safaricom','airtel'] as const).map(n=><Pressable key={n} onPress={()=>setNetwork(n)} style={[s.choice,{borderColor:network===n?c.tint:c.border}]}><Text style={{color:network===n?c.tint:c.textSecondary,fontWeight:'700'}}>{n==='safaricom'?'Safaricom':'Airtel'}</Text></Pressable>)}</View><View style={s.row}>{(['once','daily','weekly'] as const).map(r=><Pressable key={r} onPress={()=>setRecurrence(r)} style={[s.choice,{borderColor:recurrence===r?c.tint:c.border}]}><Text style={{color:recurrence===r?c.tint:c.textSecondary,fontWeight:'700'}}>{r}</Text></Pressable>)}</View>{recurrence!=='once'&&<TextInput value={limit} onChangeText={setLimit} placeholder="Run limit (blank = unlimited)" placeholderTextColor={c.muted} keyboardType="numeric" style={[s.input,{borderColor:c.border,color:c.text,backgroundColor:c.background}]}/>}<Pressable onPress={add} style={[s.primary,{backgroundColor:c.tint}]}><Text style={{color:'#fff',fontWeight:'700'}}>Add schedule</Text></Pressable></View><View style={[s.card,{backgroundColor:c.surface,borderColor:c.border}]}><Text style={[s.cardTitle,{color:c.text}]}>Scheduled deliveries</Text>{sorted.length===0?<Text style={{color:c.muted}}>No schedules yet.</Text>:sorted.map(i=><View key={i.id} style={[s.item,{borderColor:c.border}]}><View style={{flex:1,gap:3}}><Text style={{color:c.text,fontWeight:'700'}}>{i.label}</Text><Text style={{color:c.textSecondary,fontSize:12}}>{i.network} · KES {i.amount} · {i.phone}</Text><Text style={{color:c.muted,fontSize:11}}>Next: {new Date(i.runAt).toLocaleString()} · {i.recurrence} · runs {i.runsCompleted}{i.limit!=null?`/${i.limit}`:''}</Text>{i.lastRunResult&&<Text style={{color:c.muted,fontSize:11}}>Last: {i.lastRunResult}</Text>}</View><View style={{alignItems:'flex-end',gap:8}}><Switch value={i.active} onValueChange={v=>setActive(i.id,v)} trackColor={{true:c.tint,false:c.border}}/><Pressable onPress={()=>Alert.alert('Remove schedule?',i.label,[{text:'Cancel',style:'cancel'},{text:'Remove',style:'destructive',onPress:()=>removeSchedule(i.id)}])}><Text style={{color:c.error,fontSize:12,fontWeight:'700'}}>Remove</Text></Pressable></View></View>)}</View></ScrollView>}
++const s=StyleSheet.create({title:{fontSize:24,fontWeight:'800'},header:{flexDirection:'row',alignItems:'center',justifyContent:'space-between'},card:{borderRadius:14,borderWidth:1,padding:16,gap:10},cardTitle:{fontSize:16,fontWeight:'700'},input:{borderWidth:1,borderRadius:10,paddingHorizontal:12,paddingVertical:10},row:{flexDirection:'row',gap:8,flexWrap:'wrap'},choice:{borderWidth:1,borderRadius:10,paddingHorizontal:12,paddingVertical:9},primary:{borderRadius:10,paddingVertical:12,alignItems:'center'},item:{borderWidth:1,borderRadius:10,padding:12,flexDirection:'row',gap:10}});
+diff --git a/modules/ussd-executor/android/src/main/AndroidManifest.xml b/modules/ussd-executor/android/src/main/AndroidManifest.xml
+index ceb1efa..d9486e0 100644
+--- a/modules/ussd-executor/android/src/main/AndroidManifest.xml
++++ b/modules/ussd-executor/android/src/main/AndroidManifest.xml
+@@ -8,6 +8,7 @@
+ 
+     <!-- Required to access PhoneAccount information on modern Android -->
+     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
++    <uses-permission android:name="android.permission.WAKE_LOCK" />
+ 
+     <application>
+ 
+diff --git a/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdAccessibilityService.kt b/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdAccessibilityService.kt
+index 8e64636..ea2823a 100644
+--- a/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdAccessibilityService.kt
++++ b/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdAccessibilityService.kt
+@@ -2,14 +2,22 @@ package expo.modules.ussdexecutor
+ 
+ import android.accessibilityservice.AccessibilityService
+ import android.os.Bundle
++import android.os.PowerManager
+ import android.util.Log
++import android.content.Context
+ import android.view.accessibility.AccessibilityNodeInfo
+ import android.view.accessibility.AccessibilityEvent
+ 
+ class UssdAccessibilityService : AccessibilityService() {
+ 
++  private var wakeLock: PowerManager.WakeLock? = null
++
++  override fun onServiceConnected() { super.onServiceConnected(); instance = this }
++  override fun onDestroy() { releaseDialWakeLock(); if (instance === this) instance = null; super.onDestroy() }
++
+   companion object {
+     private const val TAG = "UssdAccessibility"
++    @Volatile private var instance: UssdAccessibilityService? = null
+ 
+     @Volatile
+     var pendingInputs: MutableList<String> = mutableListOf()
+@@ -42,6 +50,16 @@ class UssdAccessibilityService : AccessibilityService() {
+ 
+       Log.d(TAG, "USSD request cancelled")
+     }
++
++    fun dismissLingeringDialog() {
++      val service = instance ?: return
++      try { service.rootInActiveWindow?.let { root -> service.findDismissButton(root)?.performAction(AccessibilityNodeInfo.ACTION_CLICK) } } catch (e: Exception) { Log.w(TAG, "Could not dismiss lingering USSD dialog: ${e.message}") }
++    }
++    fun acquireDialWakeLock() {
++      val service = instance ?: return
++      try { val pm = service.getSystemService(Context.POWER_SERVICE) as PowerManager; if (service.wakeLock?.isHeld == true) return; service.wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Webazi:USSDDial"); service.wakeLock?.setReferenceCounted(false); service.wakeLock?.acquire(5 * 60 * 1000L) } catch (e: Exception) { Log.w(TAG, "Could not acquire wake lock: ${e.message}") }
++    }
++    fun releaseDialWakeLock() { try { instance?.wakeLock?.let { if (it.isHeld) it.release() }; instance?.wakeLock = null } catch (e: Exception) { Log.w(TAG, "Could not release wake lock: ${e.message}") } }
+   }
+ 
+   override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+@@ -336,6 +354,15 @@ class UssdAccessibilityService : AccessibilityService() {
+     return null
+   }
+ 
++  private fun findDismissButton(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
++    val text = node.text?.toString()?.trim()?.lowercase() ?: ""
++    val className = node.className?.toString()?.lowercase() ?: ""
++    val dismissText = setOf("close", "cancel", "dismiss", "ok", "done", "end", "hang up")
++    if (node.isClickable && (text in dismissText || (className.contains("button") && text.isNotBlank()))) return node
++    for (i in 0 until node.childCount) { try { node.getChild(i)?.let { findDismissButton(it)?.let { found -> return found } } } catch (_: Exception) {} }
++    return null
++  }
++
+   private fun findClickableButton(
+     node: AccessibilityNodeInfo
+   ): AccessibilityNodeInfo? {
+diff --git a/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdExecutorModule.kt b/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdExecutorModule.kt
+index 5fcfb68..1f80555 100644
+--- a/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdExecutorModule.kt
++++ b/modules/ussd-executor/android/src/main/java/expo/modules/ussdexecutor/UssdExecutorModule.kt
+@@ -52,6 +52,10 @@ class UssdExecutorModule : Module() {
+       }
+     }
+ 
++    Function("closeLingeringUssdDialog") { UssdAccessibilityService.dismissLingeringDialog() }
++    Function("acquireDialWakeLock") { UssdAccessibilityService.acquireDialWakeLock() }
++    Function("releaseDialWakeLock") { UssdAccessibilityService.releaseDialWakeLock() }
++
+     // Dial USSD using the exact Android subscription ID selected by the user.
+     Function("dialUssd") {
+       ussdCode: String,
+diff --git a/modules/ussd-executor/src/UssdExecutorModule.ts b/modules/ussd-executor/src/UssdExecutorModule.ts
+index 380426a..515f59c 100644
+--- a/modules/ussd-executor/src/UssdExecutorModule.ts
++++ b/modules/ussd-executor/src/UssdExecutorModule.ts
+@@ -5,6 +5,9 @@ declare class UssdExecutorModule extends NativeModule<UssdExecutorModuleEvents>
+   isAccessibilityEnabled(): boolean;
+   openAccessibilitySettings(): void;
+   dialUssd(ussdCode: string, subscriptionId: number, menuInputs: string[]): void;
++  closeLingeringUssdDialog(): void;
++  acquireDialWakeLock(): void;
++  releaseDialWakeLock(): void;
+ }
+ 
+ export default requireNativeModule<UssdExecutorModule>('UssdExecutor');
+diff --git a/services/scheduler.ts b/services/scheduler.ts
+new file mode 100644
+index 0000000..2d348ea
+--- /dev/null
++++ b/services/scheduler.ts
+@@ -0,0 +1,8 @@
++import { useScheduleStore, type ScheduledDial } from '../store/useScheduleStore';
++import { useActivityStore } from '../store/useActivityStore';
++import { manualDeliver } from './smsAutomation';
++const CHECK_INTERVAL_MS=30000; let intervalHandle:ReturnType<typeof setInterval>|null=null; let running=false;
++export function startSchedulerLoop(){if(intervalHandle)return;intervalHandle=setInterval(()=>void runDueSchedules(),CHECK_INTERVAL_MS);void runDueSchedules();}
++export function stopSchedulerLoop(){if(intervalHandle){clearInterval(intervalHandle);intervalHandle=null;}}
++async function runDueSchedules(){if(running)return;running=true;try{const log=useActivityStore.getState().addLog;const now=Date.now();const due=useScheduleStore.getState().items.filter(i=>i.active&&(i.limit==null||i.runsCompleted<i.limit)&&new Date(i.runAt).getTime()<=now);for(const item of due){log('info',`Running scheduled dial "${item.label}"`);const result=await manualDeliver({phone:item.phone,amount:item.amount,network:item.network});useScheduleStore.getState().recordRun(item.id,result.ok?'Queued':result.reason??'Failed to queue',computeNextRun(item));}}finally{running=false;}}
++function computeNextRun(item:ScheduledDial){if(item.recurrence==='once')return null;const base=new Date(item.runAt).getTime();return new Date(base+(item.recurrence==='daily'?86400000:604800000)).toISOString();}
+diff --git a/services/smsAutomation.ts b/services/smsAutomation.ts
+index 1d2f5e4..34eb529 100644
+--- a/services/smsAutomation.ts
++++ b/services/smsAutomation.ts
+@@ -19,6 +19,7 @@ import { useActivityStore } from '../store/useActivityStore';
+ import { useTransactionStore } from '../store/useTransactionStore';
+ import type { DialResult, LocalTransaction } from '../store/useTransactionStore';
+ import { useUnmatchedStore } from '../store/useUnmatchedStore';
++import { useAppSettingsStore } from '../store/useAppSettingsStore';
+ 
+ import { notifyWhatsApp } from './whatsapp';
+ 
+@@ -209,6 +210,13 @@ function handleSms(event: SmsReceivedPayload) {
+     return;
+   }
+ 
++  const trustedSenders = useAppSettingsStore.getState().trustedSenders;
++  const sender = String(event.sender ?? '');
++  if (!trustedSenders.some((name) => sender.toLowerCase().includes(name.toLowerCase()))) {
++    log('warn', `Ignoring SMS from untrusted sender: ${sender}`);
++    return;
++  }
++
+   /**
+    * Pull the account reference out of the SMS. If there isn't one, this
+    * isn't a Webazi order confirmation — log it to the unmatched bucket
+@@ -382,40 +390,21 @@ async function autoDial(job: DialJob) {
+ 
+     let allOk = true;
+     let failReason = '';
+-
+-    for (const dial of job.dials) {
+-      log(
+-        'info',
+-        `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`
+-      );
+-
+-      const outcome = await dialWithTimeout(
+-        dial.ussdCode,
+-        job.executionSubId,
+-        [],
+-        30000
+-      );
+-
+-      const dialResult: DialResult = {
+-        ussdCode: dial.ussdCode,
+-        amount: dial.amount,
+-        success: outcome.success,
+-        result: outcome.result,
+-      };
+-
+-      txnStore.recordDialResult(job.txnId, dialResult);
+-
+-      if (!outcome.success) {
+-        allOk = false;
+-        failReason = `${dial.label} failed: ${outcome.result}`;
+-        log('error', failReason);
+-        break;
++    const settings = useAppSettingsStore.getState();
++    if (settings.autoCloseUssdDialogs && typeof (UssdExecutor as any).closeLingeringUssdDialog === 'function') { try { (UssdExecutor as any).closeLingeringUssdDialog(); } catch {} }
++    if (settings.keepScreenAwakeDuringDial && typeof (UssdExecutor as any).acquireDialWakeLock === 'function') { try { (UssdExecutor as any).acquireDialWakeLock(); } catch {} }
++    try {
++      for (const dial of job.dials) {
++        log('info', `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`);
++        if (settings.autoCloseUssdDialogs && typeof (UssdExecutor as any).closeLingeringUssdDialog === 'function') { try { (UssdExecutor as any).closeLingeringUssdDialog(); } catch {} }
++        const outcome = await dialWithTimeout(dial.ussdCode, job.executionSubId, [], settings.ussdTimeoutMs);
++        const dialResult: DialResult = { ussdCode: dial.ussdCode, amount: dial.amount, success: outcome.success, result: outcome.result };
++        txnStore.recordDialResult(job.txnId, dialResult);
++        if (!outcome.success) { allOk=false; failReason=`${dial.label} failed: ${outcome.result}`; log('error',failReason); break; }
++        log('success', `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`);
+       }
+-
+-      log(
+-        'success',
+-        `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`
+-      );
++    } finally {
++      if (settings.keepScreenAwakeDuringDial && typeof (UssdExecutor as any).releaseDialWakeLock === 'function') { try { (UssdExecutor as any).releaseDialWakeLock(); } catch {} }
+     }
+ 
+     if (allOk) {
+@@ -438,6 +427,16 @@ async function autoDial(job: DialJob) {
+       );
+ 
+       txnStore.markFailed(job.txnId, failReason);
++      if (settings.autoRetryEnabled) {
++        const current = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
++        if (current && current.attempts < 3) {
++          log('warn', `Scheduling automatic retry ${current.attempts + 1}/3 in ${Math.round(settings.autoRetryDelayMs / 1000)}s`);
++          setTimeout(() => {
++            const latest = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
++            if (latest && latest.attempts < 3) void retryDelivery(latest);
++          }, settings.autoRetryDelayMs);
++        }
++      }
+ 
+       await notifyWhatsApp({
+         to: job.phone,
+@@ -656,6 +655,6 @@ export async function manualDial(
+     ussdCode,
+     subscriptionId,
+     menuInputs,
+-    30000
++    useAppSettingsStore.getState().ussdTimeoutMs
+   );
+ }
+diff --git a/store/useAppSettingsStore.ts b/store/useAppSettingsStore.ts
+new file mode 100644
+index 0000000..01cf3b5
+--- /dev/null
++++ b/store/useAppSettingsStore.ts
+@@ -0,0 +1,35 @@
++import AsyncStorage from '@react-native-async-storage/async-storage';
++import { create } from 'zustand';
++import { persist } from 'zustand/middleware';
++
++const DEFAULT_TRUSTED_SENDERS = ['MPESA'];
++
++type State = {
++  trustedSenders: string[]; addTrustedSender: (sender: string) => void; removeTrustedSender: (sender: string) => void;
++  autoCloseUssdDialogs: boolean; setAutoCloseUssdDialogs: (v: boolean) => void;
++  keepScreenAwakeDuringDial: boolean; setKeepScreenAwakeDuringDial: (v: boolean) => void;
++  ussdTimeoutMs: number; setUssdTimeoutMs: (ms: number) => void;
++  autoRetryEnabled: boolean; setAutoRetryEnabled: (v: boolean) => void;
++  autoRetryDelayMs: number; setAutoRetryDelayMs: (ms: number) => void;
++  autoDeleteDays: number | null; setAutoDeleteDays: (days: number | null) => void;
++  autoDeleteLastRunAt: string | null; setAutoDeleteLastRunAt: (iso: string) => void;
++  statsHidden: boolean; setStatsHidden: (v: boolean) => void;
++};
++
++export const useAppSettingsStore = create<State>()(persist((set) => ({
++  trustedSenders: DEFAULT_TRUSTED_SENDERS,
++  addTrustedSender: (sender) => { const trimmed = sender.trim(); if (!trimmed) return; set((s) => s.trustedSenders.some((x) => x.toLowerCase() === trimmed.toLowerCase()) ? s : { trustedSenders: [...s.trustedSenders, trimmed] }); },
++  removeTrustedSender: (sender) => set((s) => ({ trustedSenders: s.trustedSenders.filter((x) => x.toLowerCase() !== sender.toLowerCase()) })),
++  autoCloseUssdDialogs: true, setAutoCloseUssdDialogs: (v) => set({ autoCloseUssdDialogs: v }),
++  keepScreenAwakeDuringDial: false, setKeepScreenAwakeDuringDial: (v) => set({ keepScreenAwakeDuringDial: v }),
++  ussdTimeoutMs: 30000, setUssdTimeoutMs: (ms) => set({ ussdTimeoutMs: Math.max(5000, ms) }),
++  autoRetryEnabled: false, setAutoRetryEnabled: (v) => set({ autoRetryEnabled: v }),
++  autoRetryDelayMs: 60000, setAutoRetryDelayMs: (ms) => set({ autoRetryDelayMs: Math.max(10000, ms) }),
++  autoDeleteDays: null, setAutoDeleteDays: (days) => set({ autoDeleteDays: days && days > 0 ? days : null }),
++  autoDeleteLastRunAt: null, setAutoDeleteLastRunAt: (iso) => set({ autoDeleteLastRunAt: iso }),
++  statsHidden: false, setStatsHidden: (v) => set({ statsHidden: v }),
++}), { name: 'webazi-app-settings-store', storage: {
++  getItem: async (name) => { const value = await AsyncStorage.getItem(name); return value ? JSON.parse(value) : null; },
++  setItem: async (name, value) => { await AsyncStorage.setItem(name, JSON.stringify(value)); },
++  removeItem: async (name) => { await AsyncStorage.removeItem(name); },
++} }));
+diff --git a/store/useScheduleStore.ts b/store/useScheduleStore.ts
+new file mode 100644
+index 0000000..b225562
+--- /dev/null
++++ b/store/useScheduleStore.ts
+@@ -0,0 +1,13 @@
++import AsyncStorage from '@react-native-async-storage/async-storage';
++import { create } from 'zustand';
++import { persist } from 'zustand/middleware';
++export type ScheduleRecurrence = 'once' | 'daily' | 'weekly';
++export type ScheduledDial = { id:string; label:string; phone:string; amount:number; network:'safaricom'|'airtel'; runAt:string; recurrence:ScheduleRecurrence; limit:number|null; runsCompleted:number; active:boolean; createdAt:string; lastRunAt:string|null; lastRunResult:string|null; };
++type State={items:ScheduledDial[]; addSchedule:(input:{label:string;phone:string;amount:number;network:'safaricom'|'airtel';runAt:string;recurrence:ScheduleRecurrence;limit:number|null})=>string; removeSchedule:(id:string)=>void; setActive:(id:string,active:boolean)=>void; recordRun:(id:string,resultText:string,nextRunAt:string|null)=>void};
++export const useScheduleStore=create<State>()(persist((set)=>({
++ items:[],
++ addSchedule:({label,phone,amount,network,runAt,recurrence,limit})=>{const id=`${Date.now()}-${Math.random().toString(36).slice(2,7)}`;set(s=>({items:[{id,label,phone,amount,network,runAt,recurrence,limit,runsCompleted:0,active:true,createdAt:new Date().toISOString(),lastRunAt:null,lastRunResult:null},...s.items]}));return id;},
++ removeSchedule:id=>set(s=>({items:s.items.filter(i=>i.id!==id)})),
++ setActive:(id,active)=>set(s=>({items:s.items.map(i=>i.id===id?{...i,active}:i)})),
++ recordRun:(id,resultText,nextRunAt)=>set(s=>({items:s.items.map(it=>{if(it.id!==id)return it;const runsCompleted=it.runsCompleted+1;const limitReached=it.limit!=null&&runsCompleted>=it.limit;return {...it,runsCompleted,lastRunAt:new Date().toISOString(),lastRunResult:resultText,runAt:nextRunAt??it.runAt,active:nextRunAt!=null&&!limitReached};})}))
++}),{name:'webazi-schedule-store',storage:{getItem:async n=>{const v=await AsyncStorage.getItem(n);return v?JSON.parse(v):null;},setItem:async(n,v)=>AsyncStorage.setItem(n,JSON.stringify(v)),removeItem:async n=>AsyncStorage.removeItem(n)}}));
+diff --git a/store/useTransactionStore.ts b/store/useTransactionStore.ts
+index f7dec4e..4e9026e 100644
+--- a/store/useTransactionStore.ts
++++ b/store/useTransactionStore.ts
+@@ -46,6 +46,7 @@ type State = {
+   markFailed: (id: string, reason: string) => void;
+   bumpAttempts: (id: string) => void;
+   deleteTransaction: (id: string) => void;
++  purgeOlderThan: (days: number) => void;
+ };
+ 
+ export const useTransactionStore = create<State>()(
+@@ -137,9 +138,12 @@ export const useTransactionStore = create<State>()(
+       },
+ 
+       deleteTransaction: (id) => {
+-        set((s) => ({
+-          transactions: s.transactions.filter((t) => t.id !== id),
+-        }));
++        set((s) => ({ transactions: s.transactions.filter((t) => t.id !== id) }));
++      },
++
++      purgeOlderThan: (days) => {
++        const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
++        set((s) => ({ transactions: s.transactions.filter((t) => t.status === 'pending' || new Date(t.createdAt).getTime() >= cutoff) }));
+       },
+     }),
+     {

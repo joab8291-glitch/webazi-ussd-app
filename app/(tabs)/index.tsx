@@ -24,6 +24,8 @@ import {
 } from '@/services/smsAutomation';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
 import { healthCheck } from '@/services/api';
+import { useAppSettingsStore } from '@/store/useAppSettingsStore';
+import { startSchedulerLoop, stopSchedulerLoop } from '@/services/scheduler';
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -33,7 +35,11 @@ export default function HomeScreen() {
   const { smsListening, tillSubscriptionId, availableSims } = useSimStore();
   const logs = useActivityStore((s) => s.logs);
   const clearLogs = useActivityStore((s) => s.clear);
-  const { transactions } = useTransactionStore();
+  const { transactions, purgeOlderThan } = useTransactionStore();
+  const statsHidden = useAppSettingsStore((s) => s.statsHidden);
+  const setStatsHidden = useAppSettingsStore((s) => s.setStatsHidden);
+  const autoDeleteDays = useAppSettingsStore((s) => s.autoDeleteDays);
+  const setAutoDeleteLastRunAt = useAppSettingsStore((s) => s.setAutoDeleteLastRunAt);
 
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [a11yOk, setA11yOk] = useState<boolean | null>(null);
@@ -45,6 +51,7 @@ export default function HomeScreen() {
 
   const bootstrap = useCallback(async () => {
     refreshSimSlots();
+    if (autoDeleteDays) { purgeOlderThan(autoDeleteDays); setAutoDeleteLastRunAt(new Date().toISOString()); }
     try {
       setA11yOk(UssdExecutor.isAccessibilityEnabled());
     } catch {
@@ -56,11 +63,10 @@ export default function HomeScreen() {
     } catch {
       setBackendOk(false);
     }
-  }, []);
+  }, [autoDeleteDays, purgeOlderThan, setAutoDeleteLastRunAt]);
 
-  useEffect(() => {
-    bootstrap();
-  }, [bootstrap]);
+  useEffect(() => { bootstrap(); }, [bootstrap]);
+  useEffect(() => { startSchedulerLoop(); return () => stopSchedulerLoop(); }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -112,11 +118,11 @@ export default function HomeScreen() {
 
       {/* Stats */}
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text>
+        <View style={styles.logHeader}><Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text><Pressable onPress={() => setStatsHidden(!statsHidden)}><Text style={{ color: c.tint, fontSize: 16 }}>{statsHidden ? '👁' : '🙈'}</Text></Pressable></View>
         <View style={styles.statsRow}>
-          <Stat label="Pending" value={pendingCount} color={c.warning} />
-          <Stat label="Done" value={completedCount} color={c.success} />
-          <Stat label="Failed" value={failedCount} color={c.error} />
+          <Stat label="Pending" value={pendingCount} color={c.warning} hidden={statsHidden} />
+          <Stat label="Done" value={completedCount} color={c.success} hidden={statsHidden} />
+          <Stat label="Failed" value={failedCount} color={c.error} hidden={statsHidden} />
         </View>
       </View>
 
@@ -207,10 +213,10 @@ function StatusChip({
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+function Stat({ label, value, color, hidden }: { label: string; value: number; color: string; hidden?: boolean }) {
   return (
     <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{value}</Text>
+      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{hidden ? '•••' : value}</Text>
       <Text style={{ fontSize: 12, color: '#687076' }}>{label}</Text>
     </View>
   );

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -34,6 +35,7 @@ export default function AirtimeManagerScreen() {
   const scheme = useColorScheme() ?? 'light';
   const c = Colors[scheme];
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [network, setNetwork] = useState<Network>('safaricom');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [search, setSearch] = useState('');
@@ -103,6 +105,7 @@ export default function AirtimeManagerScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.background, paddingTop: insets.top + 8 }}>
       <Text style={[styles.title, { color: c.text, paddingHorizontal: 16 }]}>Airtime Manager</Text>
+      <Pressable onPress={() => router.push('/ussd-scheduler')} style={[styles.schedulerLink, { borderColor: c.border, backgroundColor: c.surface }]}><Text style={{ color: c.tint, fontWeight: '700' }}>USSD Scheduler →</Text></Pressable>
 
       {/* Network sub-tabs */}
       <View style={styles.subTabs}>
@@ -500,6 +503,7 @@ function TxnCard({
 }
 
 const styles = StyleSheet.create({
+  schedulerLink: { marginHorizontal: 16, marginTop: 8, borderWidth: 1, borderRadius: 10, paddingVertical: 10, alignItems: 'center' },
   title: { fontSize: 24, fontWeight: '800', marginBottom: 8 },
   subTabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 4 },
   subTabBtn: {

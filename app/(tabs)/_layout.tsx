@@ -50,6 +50,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => <IconSymbol size={26} name="gearshape.fill" color={color} />,
         }}
       />
+      <Tabs.Screen name="ussd-scheduler" options={{ href: null, title: 'USSD Scheduler' }} />
       {/* Hide old explore template */}
       <Tabs.Screen name="explore" options={{ href: null }} />
     </Tabs>

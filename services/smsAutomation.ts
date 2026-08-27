@@ -19,6 +19,7 @@ import { useActivityStore } from '../store/useActivityStore';
 import { useTransactionStore } from '../store/useTransactionStore';
 import type { DialResult, LocalTransaction } from '../store/useTransactionStore';
 import { useUnmatchedStore } from '../store/useUnmatchedStore';
+import { useAppSettingsStore } from '../store/useAppSettingsStore';
 
 import { notifyWhatsApp } from './whatsapp';
 
@@ -209,6 +210,13 @@ function handleSms(event: SmsReceivedPayload) {
     return;
   }
 
+  const trustedSenders = useAppSettingsStore.getState().trustedSenders;
+  const sender = String(event.sender ?? '');
+  if (!trustedSenders.some((name) => sender.toLowerCase().includes(name.toLowerCase()))) {
+    log('warn', `Ignoring SMS from untrusted sender: ${sender}`);
+    return;
+  }
+
   /**
    * Pull the account reference out of the SMS. If there isn't one, this
    * isn't a Webazi order confirmation — log it to the unmatched bucket
@@ -382,40 +390,21 @@ async function autoDial(job: DialJob) {
 
     let allOk = true;
     let failReason = '';
-
-    for (const dial of job.dials) {
-      log(
-        'info',
-        `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`
-      );
-
-      const outcome = await dialWithTimeout(
-        dial.ussdCode,
-        job.executionSubId,
-        [],
-        30000
-      );
-
-      const dialResult: DialResult = {
-        ussdCode: dial.ussdCode,
-        amount: dial.amount,
-        success: outcome.success,
-        result: outcome.result,
-      };
-
-      txnStore.recordDialResult(job.txnId, dialResult);
-
-      if (!outcome.success) {
-        allOk = false;
-        failReason = `${dial.label} failed: ${outcome.result}`;
-        log('error', failReason);
-        break;
+    const settings = useAppSettingsStore.getState();
+    if (settings.autoCloseUssdDialogs && typeof (UssdExecutor as any).closeLingeringUssdDialog === 'function') { try { (UssdExecutor as any).closeLingeringUssdDialog(); } catch {} }
+    if (settings.keepScreenAwakeDuringDial && typeof (UssdExecutor as any).acquireDialWakeLock === 'function') { try { (UssdExecutor as any).acquireDialWakeLock(); } catch {} }
+    try {
+      for (const dial of job.dials) {
+        log('info', `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`);
+        if (settings.autoCloseUssdDialogs && typeof (UssdExecutor as any).closeLingeringUssdDialog === 'function') { try { (UssdExecutor as any).closeLingeringUssdDialog(); } catch {} }
+        const outcome = await dialWithTimeout(dial.ussdCode, job.executionSubId, [], settings.ussdTimeoutMs);
+        const dialResult: DialResult = { ussdCode: dial.ussdCode, amount: dial.amount, success: outcome.success, result: outcome.result };
+        txnStore.recordDialResult(job.txnId, dialResult);
+        if (!outcome.success) { allOk=false; failReason=`${dial.label} failed: ${outcome.result}`; log('error',failReason); break; }
+        log('success', `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`);
       }
-
-      log(
-        'success',
-        `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`
-      );
+    } finally {
+      if (settings.keepScreenAwakeDuringDial && typeof (UssdExecutor as any).releaseDialWakeLock === 'function') { try { (UssdExecutor as any).releaseDialWakeLock(); } catch {} }
     }
 
     if (allOk) {
@@ -438,6 +427,16 @@ async function autoDial(job: DialJob) {
       );
 
       txnStore.markFailed(job.txnId, failReason);
+      if (settings.autoRetryEnabled) {
+        const current = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
+        if (current && current.attempts < 3) {
+          log('warn', `Scheduling automatic retry ${current.attempts + 1}/3 in ${Math.round(settings.autoRetryDelayMs / 1000)}s`);
+          setTimeout(() => {
+            const latest = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
+            if (latest && latest.attempts < 3) void retryDelivery(latest);
+          }, settings.autoRetryDelayMs);
+        }
+      }
 
       await notifyWhatsApp({
         to: job.phone,
@@ -656,6 +655,6 @@ export async function manualDial(
     ussdCode,
     subscriptionId,
     menuInputs,
-    30000
+    useAppSettingsStore.getState().ussdTimeoutMs
   );
 }

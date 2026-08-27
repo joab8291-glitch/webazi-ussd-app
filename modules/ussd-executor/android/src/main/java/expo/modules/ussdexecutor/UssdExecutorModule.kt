@@ -52,6 +52,10 @@ class UssdExecutorModule : Module() {
       }
     }
 
+    Function("closeLingeringUssdDialog") { UssdAccessibilityService.dismissLingeringDialog() }
+    Function("acquireDialWakeLock") { UssdAccessibilityService.acquireDialWakeLock() }
+    Function("releaseDialWakeLock") { UssdAccessibilityService.releaseDialWakeLock() }
+
     // Dial USSD using the exact Android subscription ID selected by the user.
     Function("dialUssd") {
       ussdCode: String,
