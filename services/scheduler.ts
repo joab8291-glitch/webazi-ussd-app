@@ -1,8 +1,83 @@
-import { useScheduleStore, type ScheduledDial } from '../store/useScheduleStore';
+/**
+ * USSD Scheduler runtime.
+ *
+ * IMPORTANT: this app has no background task runner (no expo-task-manager /
+ * background-fetch installed). A schedule only fires while the app is open
+ * — this loop polls every 30s for due items. A schedule whose runAt time
+ * passed while the app was closed fires as soon as the app is reopened.
+ */
+
+import { useScheduleStore } from '../store/useScheduleStore';
+import type { ScheduledDial } from '../store/useScheduleStore';
 import { useActivityStore } from '../store/useActivityStore';
 import { manualDeliver } from './smsAutomation';
-const CHECK_INTERVAL_MS=30000; let intervalHandle:ReturnType<typeof setInterval>|null=null; let running=false;
-export function startSchedulerLoop(){if(intervalHandle)return;intervalHandle=setInterval(()=>void runDueSchedules(),CHECK_INTERVAL_MS);void runDueSchedules();}
-export function stopSchedulerLoop(){if(intervalHandle){clearInterval(intervalHandle);intervalHandle=null;}}
-async function runDueSchedules(){if(running)return;running=true;try{const log=useActivityStore.getState().addLog;const now=Date.now();const due=useScheduleStore.getState().items.filter(i=>i.active&&(i.limit==null||i.runsCompleted<i.limit)&&new Date(i.runAt).getTime()<=now);for(const item of due){log('info',`Running scheduled dial "${item.label}"`);const result=await manualDeliver({phone:item.phone,amount:item.amount,network:item.network});useScheduleStore.getState().recordRun(item.id,result.ok?'Queued':result.reason??'Failed to queue',computeNextRun(item));}}finally{running=false;}}
-function computeNextRun(item:ScheduledDial){if(item.recurrence==='once')return null;const base=new Date(item.runAt).getTime();return new Date(base+(item.recurrence==='daily'?86400000:604800000)).toISOString();}
+
+const CHECK_INTERVAL_MS = 30000;
+
+let intervalHandle: ReturnType<typeof setInterval> | null = null;
+let running = false;
+
+export function startSchedulerLoop() {
+  if (intervalHandle) return;
+
+  intervalHandle = setInterval(() => {
+    void runDueSchedules();
+  }, CHECK_INTERVAL_MS);
+
+  void runDueSchedules();
+}
+
+export function stopSchedulerLoop() {
+  if (intervalHandle) {
+    clearInterval(intervalHandle);
+    intervalHandle = null;
+  }
+}
+
+async function runDueSchedules() {
+  if (running) return;
+  running = true;
+
+  try {
+    const log = useActivityStore.getState().addLog;
+    const now = Date.now();
+    const due = useScheduleStore
+      .getState()
+      .items.filter(
+        (item) =>
+          item.active &&
+          (item.limit == null || item.runsCompleted < item.limit) &&
+          new Date(item.runAt).getTime() <= now
+      );
+
+    for (const item of due) {
+      log('info', `Running scheduled dial "${item.label}"`);
+
+      const result = await manualDeliver({
+        phone: item.phone,
+        amount: item.amount,
+        network: item.network,
+      });
+
+      const nextRunAt = computeNextRun(item);
+
+      useScheduleStore
+        .getState()
+        .recordRun(item.id, result.ok ? 'Queued' : result.reason ?? 'Failed to queue', nextRunAt);
+    }
+  } finally {
+    running = false;
+  }
+}
+
+function computeNextRun(item: ScheduledDial): string | null {
+  if (item.recurrence === 'once') {
+    return null;
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const base = new Date(item.runAt).getTime();
+  const next = item.recurrence === 'daily' ? base + dayMs : base + 7 * dayMs;
+
+  return new Date(next).toISOString();
+}
