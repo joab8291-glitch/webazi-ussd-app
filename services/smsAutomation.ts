@@ -45,6 +45,12 @@ type DialJob = {
 const dialQueue: DialJob[] = [];
 let processingQueue = false;
 
+/** True while a real delivery dial is in flight or queued — used by the
+ * float-balance checker to avoid dialing over an active customer order. */
+export function isDialQueueBusy(): boolean {
+  return processingQueue || dialQueue.length > 0;
+}
+
 /**
  * Request SMS-related permissions.
  */
@@ -376,6 +382,33 @@ export function processSmsPayload(
   }
 
   /**
+   * Duplicate-payment guard rail — flags (doesn't block) an order whose
+   * phone AND amount match another order placed within the last 10
+   * minutes. This is separate from the receipt-based dedupe above: it
+   * catches a different M-Pesa receipt for what's likely the same
+   * customer typing their number twice, or a SIM-swap fraud attempt —
+   * cases the receipt check can't see since the receipt differs. Legit
+   * repeat customers exist, so this only flags for a human to glance at
+   * on the Orders screen; it never stops delivery.
+   */
+  const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
+  const possibleDuplicate = useTransactionStore
+    .getState()
+    .transactions.some(
+      (t) =>
+        t.phone === phone &&
+        t.amount === amount &&
+        Date.now() - new Date(t.createdAt).getTime() <= DUPLICATE_WINDOW_MS
+    );
+
+  if (possibleDuplicate) {
+    log(
+      'warn',
+      `${phone} paid KES ${amount} again within 10 minutes — flagged as possible duplicate, still delivering`
+    );
+  }
+
+  /**
    * Execution SIM is chosen by network, independent of the Till SIM:
    * Safaricom orders dial from the Safaricom line, Airtel orders dial
    * from the Airtel line.
@@ -437,6 +470,7 @@ export function processSmsPayload(
     network,
     phone,
     amount,
+    possibleDuplicate,
   });
 
   logMessage({
@@ -692,14 +726,14 @@ async function autoDial(job: DialJob) {
   }
 }
 
-const AUTO_RETRY_MAX_ATTEMPTS = 3;
-
 /**
  * If auto-retry is enabled in Settings, schedule another attempt for a
- * failed order after the configured delay — capped at
- * AUTO_RETRY_MAX_ATTEMPTS so a persistently failing order doesn't retry
- * forever. Re-checks the transaction at fire time in case it was deleted,
- * manually requeued, or resolved in the meantime.
+ * failed order using the configured backoff — attempt 2 fires after
+ * backoffMs[0], attempt 3 after backoffMs[1], and so on. Once attempts
+ * exceed the backoff array length, the order is left failed (and
+ * already notified via WhatsApp/Activity log) instead of retrying
+ * forever. Re-checks the transaction at fire time in case it was
+ * deleted, manually requeued, or resolved in the meantime.
  */
 function scheduleAutoRetry(job: DialJob) {
   const settings = useAppSettingsStore.getState();
@@ -709,8 +743,23 @@ function scheduleAutoRetry(job: DialJob) {
   }
 
   const txn = useTransactionStore.getState().transactions.find((t) => t.id === job.txnId);
+  const backoff = settings.autoRetryBackoffMs;
 
-  if (!txn || txn.status !== 'failed' || txn.attempts >= AUTO_RETRY_MAX_ATTEMPTS) {
+  // attempts=1 is the original dial; attempts=2 is the first retry, so
+  // backoff[attempts - 1] is the delay before the *next* attempt.
+  if (!txn || txn.status !== 'failed' || txn.attempts > backoff.length) {
+    return;
+  }
+
+  const delayMs = backoff[txn.attempts - 1];
+  if (delayMs == null) {
+    useActivityStore
+      .getState()
+      .addLog(
+        'warn',
+        `${job.phone}: auto-retry attempts exhausted (${txn.attempts}/${backoff.length}) — left failed`,
+        { amount: job.amount, phone: job.phone }
+      );
     return;
   }
 
@@ -718,9 +767,9 @@ function scheduleAutoRetry(job: DialJob) {
     .getState()
     .addLog(
       'info',
-      `Auto-retry scheduled for ${job.phone} in ${Math.round(settings.autoRetryDelayMs / 1000)}s (attempt ${
+      `Auto-retry scheduled for ${job.phone} in ${Math.round(delayMs / 1000)}s (attempt ${
         txn.attempts + 1
-      }/${AUTO_RETRY_MAX_ATTEMPTS})`,
+      }/${backoff.length + 1})`,
       { amount: job.amount, phone: job.phone }
     );
 
@@ -732,7 +781,7 @@ function scheduleAutoRetry(job: DialJob) {
     }
 
     void retryDelivery(latest);
-  }, settings.autoRetryDelayMs);
+  }, delayMs);
 }
 
 /**
