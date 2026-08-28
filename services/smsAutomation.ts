@@ -426,7 +426,8 @@ export function processSmsPayload(
 
   log(
     'success',
-    `Decoded ${ref} → ${network} KES ${amount} to ${phone}. ${job.summary}`
+    `Decoded ${ref} → ${network} KES ${amount} to ${phone}. ${job.summary}`,
+    { amount, phone }
   );
 
   const txnId = useTransactionStore.getState().addPending({
@@ -491,7 +492,8 @@ function enqueueDial(job: DialJob) {
     .getState()
     .addLog(
       'info',
-      `${job.summary} added to USSD queue (${dialQueue.length} pending)`
+      `${job.summary} added to USSD queue (${dialQueue.length} pending)`,
+      { amount: job.amount, phone: job.phone }
     );
 
   void processDialQueue();
@@ -604,7 +606,8 @@ async function autoDial(job: DialJob) {
 
       log(
         'info',
-        `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`
+        `Dialing ${dial.label} on ${job.network} execution SIM → ${dial.ussdCode}`,
+        { amount: dial.amount, phone: job.phone }
       );
 
       const outcome = await dialWithTimeout(
@@ -632,14 +635,16 @@ async function autoDial(job: DialJob) {
 
       log(
         'success',
-        `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`
+        `${dial.label} confirmed by USSD (${outcome.result || 'sent'})`,
+        { amount: dial.amount, phone: job.phone }
       );
     }
 
     if (allOk) {
       log(
         'success',
-        `KES ${job.amount} delivered to ${job.phone} (${job.network})`
+        `KES ${job.amount} delivered to ${job.phone} (${job.network})`,
+        { amount: job.amount, phone: job.phone }
       );
 
       txnStore.markCompleted(job.txnId);
@@ -652,7 +657,8 @@ async function autoDial(job: DialJob) {
     } else {
       log(
         'error',
-        `Delivery failed for ${job.phone} (${job.network} KES ${job.amount}): ${failReason}`
+        `Delivery failed for ${job.phone} (${job.network} KES ${job.amount}): ${failReason}`,
+        { amount: job.amount, phone: job.phone }
       );
 
       txnStore.markFailed(job.txnId, failReason);
@@ -713,7 +719,8 @@ function scheduleAutoRetry(job: DialJob) {
       'info',
       `Auto-retry scheduled for ${job.phone} in ${Math.round(settings.autoRetryDelayMs / 1000)}s (attempt ${
         txn.attempts + 1
-      }/${AUTO_RETRY_MAX_ATTEMPTS})`
+      }/${AUTO_RETRY_MAX_ATTEMPTS})`,
+      { amount: job.amount, phone: job.phone }
     );
 
   setTimeout(() => {
@@ -874,7 +881,10 @@ export async function manualDeliver(input: {
     return { ok: false, reason };
   }
 
-  log('info', `Manual delivery: ${network} KES ${amount} to ${phone}. ${job.summary}`);
+  log('info', `Manual delivery: ${network} KES ${amount} to ${phone}. ${job.summary}`, {
+    amount,
+    phone,
+  });
 
   const txnId = useTransactionStore.getState().addPending({
     ref: `MANUAL-${Date.now()}`,
