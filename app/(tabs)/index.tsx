@@ -291,7 +291,15 @@ export default function HomeScreen() {
           <Text style={[styles.hint, { color: c.muted }]}>No activity yet</Text>
         ) : (
           logs.slice(0, 30).map((entry) => (
-            <ActivityRow key={entry.id} level={entry.level} message={entry.message} timestamp={entry.timestamp} colors={c} />
+            <ActivityRow
+              key={entry.id}
+              level={entry.level}
+              message={entry.message}
+              timestamp={entry.timestamp}
+              amount={entry.amount}
+              phone={entry.phone}
+              colors={c}
+            />
           ))
         )}
       </View>
@@ -435,14 +443,20 @@ function ActivityRow({
   level,
   message,
   timestamp,
+  amount,
+  phone,
   colors,
 }: {
   level: LogLevel;
   message: string;
   timestamp: number;
+  amount?: number;
+  phone?: string;
   colors: ThemeColors;
 }) {
   const meta = activityMeta(level, colors);
+  const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const amountColor = level === 'success' ? colors.success : colors.textSecondary;
   return (
     <View style={styles.activityItem}>
       <View style={[styles.activityIcon, { backgroundColor: withAlpha(meta.color, 0.14) }]}>
@@ -452,10 +466,13 @@ function ActivityRow({
         <Text style={[styles.activityTitle, { color: colors.text }]} numberOfLines={1}>
           {message}
         </Text>
-        <Text style={[styles.activitySub, { color: colors.textSecondary }]}>
-          {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        <Text style={[styles.activitySub, { color: colors.textSecondary }]} numberOfLines={1}>
+          {phone ? `${time} · ${phone}` : time}
         </Text>
       </View>
+      <Text style={[styles.activityAmount, { color: amountColor }]}>
+        {amount != null ? `Ksh ${amount}` : '—'}
+      </Text>
     </View>
   );
 }
@@ -580,4 +597,5 @@ const styles = StyleSheet.create({
   activityIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   activityTitle: { fontSize: 13, fontWeight: '600' },
   activitySub: { fontSize: 11, marginTop: 1 },
+  activityAmount: { fontSize: 13, fontWeight: '700', marginLeft: 8, flexShrink: 0 },
 });
