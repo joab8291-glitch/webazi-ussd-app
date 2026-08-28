@@ -29,11 +29,14 @@ type State = {
   ussdTimeoutMs: number;
   setUssdTimeoutMs: (ms: number) => void;
 
-  // Auto-retry failed deliveries.
+  // Auto-retry failed deliveries, with escalating backoff: attempt 2
+  // fires after backoffMs[0], attempt 3 after backoffMs[1], etc. Once
+  // attempts exceed the array length, the order is left failed with a
+  // notification instead of retrying forever.
   autoRetryEnabled: boolean;
   setAutoRetryEnabled: (v: boolean) => void;
-  autoRetryDelayMs: number;
-  setAutoRetryDelayMs: (ms: number) => void;
+  autoRetryBackoffMs: number[];
+  setAutoRetryBackoffMs: (ms: number[]) => void;
 
   // Purge completed/failed orders older than N days. null/0 = never.
   // Pending orders are never auto-deleted.
@@ -59,6 +62,18 @@ type State = {
   setMissedMessagesScanEnabled: (v: boolean) => void;
   lastInboxScanAt: string | null;
   setLastInboxScanAt: (iso: string) => void;
+
+  // Daily/weekly summary — shown automatically the next time the app is
+  // opened after a day/week has passed since it was last shown (no
+  // background task runner, so it can't be pushed while closed).
+  dailySummaryEnabled: boolean;
+  setDailySummaryEnabled: (v: boolean) => void;
+  weeklySummaryEnabled: boolean;
+  setWeeklySummaryEnabled: (v: boolean) => void;
+  lastDailySummaryAt: string | null;
+  setLastDailySummaryAt: (iso: string) => void;
+  lastWeeklySummaryAt: string | null;
+  setLastWeeklySummaryAt: (iso: string) => void;
 };
 
 export const useAppSettingsStore = create<State>()(
@@ -93,8 +108,10 @@ export const useAppSettingsStore = create<State>()(
 
       autoRetryEnabled: false,
       setAutoRetryEnabled: (v) => set({ autoRetryEnabled: v }),
-      autoRetryDelayMs: 60000,
-      setAutoRetryDelayMs: (ms) => set({ autoRetryDelayMs: Math.max(10000, ms) }),
+      // 2min, 5min, 15min — 3 retries then leave it failed.
+      autoRetryBackoffMs: [2 * 60000, 5 * 60000, 15 * 60000],
+      setAutoRetryBackoffMs: (ms) =>
+        set({ autoRetryBackoffMs: ms.filter((n) => Number.isFinite(n) && n > 0) }),
 
       autoDeleteDays: null,
       setAutoDeleteDays: (days) => set({ autoDeleteDays: days && days > 0 ? days : null }),
@@ -112,6 +129,15 @@ export const useAppSettingsStore = create<State>()(
       setMissedMessagesScanEnabled: (v) => set({ missedMessagesScanEnabled: v }),
       lastInboxScanAt: null,
       setLastInboxScanAt: (iso) => set({ lastInboxScanAt: iso }),
+
+      dailySummaryEnabled: true,
+      setDailySummaryEnabled: (v) => set({ dailySummaryEnabled: v }),
+      weeklySummaryEnabled: true,
+      setWeeklySummaryEnabled: (v) => set({ weeklySummaryEnabled: v }),
+      lastDailySummaryAt: null,
+      setLastDailySummaryAt: (iso) => set({ lastDailySummaryAt: iso }),
+      lastWeeklySummaryAt: null,
+      setLastWeeklySummaryAt: (iso) => set({ lastWeeklySummaryAt: iso }),
     }),
     {
       name: 'webazi-app-settings-store',
