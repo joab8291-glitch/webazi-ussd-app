@@ -76,7 +76,17 @@ function computeNextRun(item: ScheduledDial): string | null {
   }
 
   const dayMs = 24 * 60 * 60 * 1000;
-  const base = new Date(item.runAt).getTime();
+
+  // Base the next run off whichever is later: the originally scheduled
+  // time, or right now. If the app was closed and this run fired late
+  // (runAt is in the past), basing off the stale runAt would put the
+  // "next" run in the past too — the 30s poll would then fire it again
+  // almost immediately, repeating every 30s until it caught up to the
+  // present. Real airtime would go out multiple times for what should
+  // have been a single missed run. Basing off now() when late collapses
+  // any missed occurrences into a single catch-up run and schedules the
+  // next one properly in the future.
+  const base = Math.max(new Date(item.runAt).getTime(), Date.now());
   const next = item.recurrence === 'daily' ? base + dayMs : base + 7 * dayMs;
 
   return new Date(next).toISOString();
