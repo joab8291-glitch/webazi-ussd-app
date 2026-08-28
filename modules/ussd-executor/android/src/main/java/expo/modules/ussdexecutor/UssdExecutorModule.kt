@@ -34,7 +34,7 @@ class UssdExecutorModule : Module() {
           Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         )
 
-        enabledServices?.split(":")?.any {
+        enabled = enabledServices?.split(":")?.any {
           it.equals(
             "${context.packageName}/expo.modules.ussdexecutor.UssdAccessibilityService",
             ignoreCase = true
