@@ -15,6 +15,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useSimStore } from '@/store/useSimStore';
 import { useActivityStore } from '@/store/useActivityStore';
 import { useTransactionStore } from '@/store/useTransactionStore';
+import { useAppSettingsStore } from '@/store/useAppSettingsStore';
 import {
   startSmsListening,
   stopSmsListening,
@@ -22,10 +23,10 @@ import {
   requestSmsPermissions,
   requestCallPermission,
 } from '@/services/smsAutomation';
+import { startSchedulerLoop, stopSchedulerLoop } from '@/services/scheduler';
+import { scanMissedMessages } from '@/services/missedMessages';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
 import { healthCheck } from '@/services/api';
-import { useAppSettingsStore } from '@/store/useAppSettingsStore';
-import { startSchedulerLoop, stopSchedulerLoop } from '@/services/scheduler';
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -35,11 +36,9 @@ export default function HomeScreen() {
   const { smsListening, tillSubscriptionId, availableSims } = useSimStore();
   const logs = useActivityStore((s) => s.logs);
   const clearLogs = useActivityStore((s) => s.clear);
-  const { transactions, purgeOlderThan } = useTransactionStore();
+  const { transactions } = useTransactionStore();
   const statsHidden = useAppSettingsStore((s) => s.statsHidden);
   const setStatsHidden = useAppSettingsStore((s) => s.setStatsHidden);
-  const autoDeleteDays = useAppSettingsStore((s) => s.autoDeleteDays);
-  const setAutoDeleteLastRunAt = useAppSettingsStore((s) => s.setAutoDeleteLastRunAt);
 
   const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [a11yOk, setA11yOk] = useState<boolean | null>(null);
@@ -51,7 +50,6 @@ export default function HomeScreen() {
 
   const bootstrap = useCallback(async () => {
     refreshSimSlots();
-    if (autoDeleteDays) { purgeOlderThan(autoDeleteDays); setAutoDeleteLastRunAt(new Date().toISOString()); }
     try {
       setA11yOk(UssdExecutor.isAccessibilityEnabled());
     } catch {
@@ -63,10 +61,30 @@ export default function HomeScreen() {
     } catch {
       setBackendOk(false);
     }
-  }, [autoDeleteDays, purgeOlderThan, setAutoDeleteLastRunAt]);
 
-  useEffect(() => { bootstrap(); }, [bootstrap]);
-  useEffect(() => { startSchedulerLoop(); return () => stopSchedulerLoop(); }, []);
+    // Purge old completed/failed orders if auto-delete is configured.
+    // Pending orders are never touched, regardless of age.
+    const { autoDeleteDays, setAutoDeleteLastRunAt } = useAppSettingsStore.getState();
+    if (autoDeleteDays != null && autoDeleteDays > 0) {
+      useTransactionStore.getState().purgeOlderThan(autoDeleteDays);
+      setAutoDeleteLastRunAt(new Date().toISOString());
+    }
+
+    // Missed Messages — catch any Till-SIM SMS that arrived while the
+    // app/process was killed and the live listener wasn't around to see it.
+    scanMissedMessages().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    bootstrap();
+  }, [bootstrap]);
+
+  // USSD Scheduler only fires while the app is open — start/stop the
+  // polling loop with this screen's lifecycle.
+  useEffect(() => {
+    startSchedulerLoop();
+    return () => stopSchedulerLoop();
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -106,7 +124,7 @@ export default function HomeScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
       <Text style={[styles.brand, { color: c.tint }]}>Webazi</Text>
       <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-        USSD data delivery Â· auto-fulfillment
+        USSD data delivery · auto-fulfillment
       </Text>
 
       {/* Status row */}
@@ -118,7 +136,12 @@ export default function HomeScreen() {
 
       {/* Stats */}
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
-        <View style={styles.logHeader}><Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text><Pressable onPress={() => setStatsHidden(!statsHidden)}><Text style={{ color: c.tint, fontSize: 16 }}>{statsHidden ? 'ðŸ‘' : 'ðŸ™ˆ'}</Text></Pressable></View>
+        <View style={styles.logHeader}>
+          <Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text>
+          <Pressable onPress={() => setStatsHidden(!statsHidden)} hitSlop={8}>
+            <Text style={{ fontSize: 16 }}>{statsHidden ? '🙈' : '👁'}</Text>
+          </Pressable>
+        </View>
         <View style={styles.statsRow}>
           <Stat label="Pending" value={pendingCount} color={c.warning} hidden={statsHidden} />
           <Stat label="Done" value={completedCount} color={c.success} hidden={statsHidden} />
@@ -146,7 +169,7 @@ export default function HomeScreen() {
         {availableSims.length > 0 && (
           <Text style={[styles.hint, { color: c.textSecondary }]}>
             SIMs: {availableSims.map((s) => s.carrierName || `slot ${s.slotIndex}`).join(', ')}{'\n'}
-            Till SIM: {tillSubscriptionId != null ? `sub ${tillSubscriptionId}` : 'not set â€” open Settings'}
+            Till SIM: {tillSubscriptionId != null ? `sub ${tillSubscriptionId}` : 'not set — open Settings'}
           </Text>
         )}
       </View>
@@ -178,7 +201,7 @@ export default function HomeScreen() {
                           : c.textSecondary,
                 },
               ]}>
-              {new Date(entry.timestamp).toLocaleTimeString()} Â· {entry.message}
+              {new Date(entry.timestamp).toLocaleTimeString()} · {entry.message}
             </Text>
           ))
         )}
@@ -213,10 +236,20 @@ function StatusChip({
   );
 }
 
-function Stat({ label, value, color, hidden }: { label: string; value: number; color: string; hidden?: boolean }) {
+function Stat({
+  label,
+  value,
+  color,
+  hidden,
+}: {
+  label: string;
+  value: number;
+  color: string;
+  hidden?: boolean;
+}) {
   return (
     <View style={{ alignItems: 'center', flex: 1 }}>
-      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{hidden ? 'â€¢â€¢â€¢' : value}</Text>
+      <Text style={{ fontSize: 28, fontWeight: '700', color }}>{hidden ? '•••' : value}</Text>
       <Text style={{ fontSize: 12, color: '#687076' }}>{label}</Text>
     </View>
   );
