@@ -8,6 +8,7 @@ import {
   Switch,
   Platform,
   RefreshControl,
+  Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +28,7 @@ import {
 } from '@/services/smsAutomation';
 import { startSchedulerLoop, stopSchedulerLoop } from '@/services/scheduler';
 import { scanMissedMessages } from '@/services/missedMessages';
+import { getDueSummaries, markSummaryShown, formatSummary } from '@/services/summary';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 
@@ -75,6 +77,20 @@ export default function HomeScreen() {
     // Missed Messages — catch any Till-SIM SMS that arrived while the
     // app/process was killed and the live listener wasn't around to see it.
     scanMissedMessages().catch(() => {});
+
+    // Daily/weekly summary — shown here (app open) rather than pushed,
+    // since there's no background task runner installed. Shown after a
+    // short delay so it doesn't collide with the missed-messages scan
+    // updating the screen underneath it.
+    setTimeout(() => {
+      const due = getDueSummaries();
+      due.forEach((stats) => {
+        const { title, body } = formatSummary(stats);
+        Alert.alert(title, body || 'No orders in this period.', [
+          { text: 'OK', onPress: () => markSummaryShown(stats.period) },
+        ]);
+      });
+    }, 600);
   }, []);
 
   useEffect(() => {
