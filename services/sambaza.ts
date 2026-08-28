@@ -7,10 +7,14 @@
  *   25,500 → 2 × 10,000 + 1 × 5,500
  *
  * Official USSD pattern:
- *   *140*{amount}*{MSISDN}#
- * Example: *140*10000*254712345678#
- * MSISDN must be 2547XXXXXXXX / 2541XXXXXXXX (no leading 0).
+ *   *140*{amount}*{local phone}#
+ * Example: *140*10000*0712345678#
+ * Dialed in local format (leading 0, no 254 country code) — the till
+ * SIM is already on the Kenyan network, so there's no reason to carry
+ * the country code into the USSD string.
  */
+
+import { normalizeToLocal } from './phone';
 
 /** Safaricom hard limit per Sambaza transfer */
 export const SAMBAZA_MAX_PER_TX = 10_000;
@@ -25,7 +29,7 @@ export type SambazaChunk = {
 };
 
 export type SambazaPlan = {
-  phone: string; // normalized 254…
+  phone: string; // normalized local, e.g. 0712345678
   totalAmount: number;
   chunks: SambazaChunk[];
   ussdCodes: string[]; // one code per chunk, same order
@@ -58,20 +62,14 @@ export function splitIntoChunks(amount: number): SambazaChunk[] {
   return chunks.map((c) => ({ ...c, total: n }));
 }
 
-/** Normalize Kenyan MSISDN to 254XXXXXXXXX */
+/** Normalize a Kenyan phone number to local format: 0XXXXXXXXX */
 export function normalizePhone(raw: string): string | null {
-  const digits = String(raw).replace(/\D/g, '');
-  if (digits.startsWith('254') && digits.length === 12) return digits;
-  if (digits.startsWith('0') && digits.length === 10) return '254' + digits.slice(1);
-  if (digits.length === 9 && (digits.startsWith('7') || digits.startsWith('1'))) {
-    return '254' + digits;
-  }
-  return null;
+  return normalizeToLocal(raw);
 }
 
-/** Build a single Sambaza USSD string: *140*{amount}*{MSISDN}# */
-export function buildSambazaUssd(phone254: string, amount: number): string {
-  return `*140*${amount}*${phone254}#`;
+/** Build a single Sambaza USSD string: *140*{amount}*{local phone}# */
+export function buildSambazaUssd(phoneLocal: string, amount: number): string {
+  return `*140*${amount}*${phoneLocal}#`;
 }
 
 /**
@@ -79,17 +77,17 @@ export function buildSambazaUssd(phone254: string, amount: number): string {
  * Returns null if phone/amount invalid.
  */
 export function buildSambazaPlan(phone: string, amount: number): SambazaPlan | null {
-  const phone254 = normalizePhone(phone);
-  if (!phone254) return null;
+  const phoneLocal = normalizePhone(phone);
+  if (!phoneLocal) return null;
 
   const chunks = splitIntoChunks(amount);
   if (chunks.length === 0) return null;
 
   return {
-    phone: phone254,
+    phone: phoneLocal,
     totalAmount: Math.round(Number(amount)),
     chunks,
-    ussdCodes: chunks.map((c) => buildSambazaUssd(phone254, c.amount)),
+    ussdCodes: chunks.map((c) => buildSambazaUssd(phoneLocal, c.amount)),
   };
 }
 
