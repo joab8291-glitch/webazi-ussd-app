@@ -11,6 +11,7 @@ import {
   SAMBAZA_MAX_PER_TX,
   type SambazaPlan,
 } from './sambaza';
+import { normalizeToLocal } from './phone';
 
 export type FulfillmentMode = 'sambaza' | 'data_plan';
 
@@ -74,11 +75,10 @@ export function matchOffer(amount: number): Offer | null {
 
 /** @deprecated Prefer planFulfillment */
 export function buildUssdCode(offer: Offer, phone: string): string {
-  const digits = phone.replace(/\D/g, '');
-  const p =
-    digits.startsWith('0') && digits.length === 10
-      ? '254' + digits.slice(1)
-      : digits;
+  // Local format, matching the live dial path in sambaza.ts — this
+  // deprecated helper previously built a 254… string, which would have
+  // dialed the wrong pattern if anything still called it.
+  const p = normalizeToLocal(phone) ?? phone.replace(/\D/g, '');
   return offer.ussdTemplate
     .replace('{phone}', p)
     .replace('{amount}', String(offer.amount));
