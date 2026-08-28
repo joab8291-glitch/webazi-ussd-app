@@ -167,6 +167,14 @@ class UssdAccessibilityService : AccessibilityService() {
       onResult = null
 
       callback?.invoke(dialogText)
+
+      /*
+       * Auto-dismiss the final response dialog (tap Send/OK/Continue) so
+       * the person doesn't have to tap it themselves. Best-effort: if no
+       * clickable button is found, the dialog is simply left on screen
+       * for manual dismissal as before.
+       */
+      clickSendButton(rootNode)
     }
   }
 
