@@ -118,7 +118,6 @@ export default function HomeScreen() {
 
   return (
     <ScrollView
-      ref={scrollRef}
       style={{ flex: 1, backgroundColor: c.background }}
       contentContainerStyle={[
         styles.container,
