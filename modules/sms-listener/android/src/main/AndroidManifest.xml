@@ -11,6 +11,10 @@
     <!-- Required to show the persistent "listener active" notification on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Required to prompt the user to exempt the app from battery optimizations,
+         so the background SMS listener isn't throttled/killed by the OS -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application>
 
         <!-- Foreground service that keeps startListening()'s BroadcastReceiver
