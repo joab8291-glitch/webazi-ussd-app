@@ -12,6 +12,10 @@ declare class SmsListenerModule extends NativeModule<SmsListenerModuleEvents> {
   startForegroundService(): void;
   stopForegroundService(): void;
   queryInboxSince(sinceMillis: number, subscriptionId: number): InboxMessage[];
+  // Battery-optimization exemption, for background reliability. Also
+  // require a native rebuild — guard with `typeof X === 'function'`.
+  isIgnoringBatteryOptimizations(): boolean;
+  requestIgnoreBatteryOptimizations(): void;
 }
 
 // This call loads the native module object from the JSI.
