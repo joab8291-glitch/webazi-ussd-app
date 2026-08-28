@@ -21,6 +21,8 @@ const MAPPING = {
   'list.bullet': 'list',
   'gearshape.fill': 'settings',
   'simcard.fill': 'sim-card',
+  'eye.fill': 'visibility',
+  'eye.slash.fill': 'visibility-off',
 } as IconMapping;
 
 /**
