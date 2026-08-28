@@ -26,7 +26,7 @@ import {
 import { startSchedulerLoop, stopSchedulerLoop } from '@/services/scheduler';
 import { scanMissedMessages } from '@/services/missedMessages';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
-import { healthCheck } from '@/services/api';
+import { IconSymbol } from '@/components/ui/icon-symbol';
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -40,7 +40,6 @@ export default function HomeScreen() {
   const statsHidden = useAppSettingsStore((s) => s.statsHidden);
   const setStatsHidden = useAppSettingsStore((s) => s.setStatsHidden);
 
-  const [backendOk, setBackendOk] = useState<boolean | null>(null);
   const [a11yOk, setA11yOk] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -54,12 +53,6 @@ export default function HomeScreen() {
       setA11yOk(UssdExecutor.isAccessibilityEnabled());
     } catch {
       setA11yOk(false);
-    }
-    try {
-      await healthCheck();
-      setBackendOk(true);
-    } catch {
-      setBackendOk(false);
     }
 
     // Purge old completed/failed orders if auto-delete is configured.
@@ -129,7 +122,6 @@ export default function HomeScreen() {
 
       {/* Status row */}
       <View style={styles.statusRow}>
-        <StatusChip label="Backend" ok={backendOk} colors={c} />
         <StatusChip label="Accessibility" ok={a11yOk} colors={c} />
         <StatusChip label="SMS" ok={smsListening} colors={c} />
       </View>
@@ -139,7 +131,11 @@ export default function HomeScreen() {
         <View style={styles.logHeader}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Today&apos;s queue</Text>
           <Pressable onPress={() => setStatsHidden(!statsHidden)} hitSlop={8}>
-            <Text style={{ fontSize: 16 }}>{statsHidden ? '🙈' : '👁'}</Text>
+            <IconSymbol
+              name={statsHidden ? 'eye.slash.fill' : 'eye.fill'}
+              size={18}
+              color={c.textSecondary}
+            />
           </Pressable>
         </View>
         <View style={styles.statsRow}>
