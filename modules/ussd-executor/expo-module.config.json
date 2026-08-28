@@ -1,6 +1,6 @@
 {
   "platforms": ["android"],
   "android": {
-    "package": "expo.modules.ussdexecutor"
+    "modules": ["expo.modules.ussdexecutor.UssdExecutorModule"]
   }
 }
