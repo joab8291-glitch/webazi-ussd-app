@@ -6,6 +6,7 @@ import { Colors, withAlpha } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useTransactionStore, LocalTransaction } from '@/store/useTransactionStore';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { exportOrdersCsv } from '@/services/exportCsv';
 
 type ThemeColors = (typeof Colors)['light'];
 type FilterKey = 'all' | 'pending' | 'failed' | 'completed';
@@ -66,6 +67,24 @@ export default function NotificationsScreen() {
               fontWeight: '600',
             }}>
             Clear all
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={{ paddingHorizontal: 16, alignItems: 'flex-end', marginBottom: 4 }}>
+        <Pressable
+          onPress={() => {
+            if (filtered.length === 0) return;
+            exportOrdersCsv(filtered, filter === 'all' ? 'All orders' : `${filter} orders`).catch(() => {});
+          }}
+          hitSlop={8}>
+          <Text
+            style={{
+              color: filtered.length ? c.tint : c.muted,
+              fontSize: 12,
+              fontWeight: '600',
+            }}>
+            Export CSV ({filtered.length})
           </Text>
         </Pressable>
       </View>
