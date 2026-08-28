@@ -649,7 +649,8 @@ async function autoDial(job: DialJob) {
         dial.ussdCode,
         job.executionSubId,
         [],
-        settings.ussdTimeoutMs
+        settings.ussdTimeoutMs,
+        true // real delivery — must match the Sambaza/Airtel confirmation text
       );
 
       const dialResult: DialResult = {
@@ -833,7 +834,12 @@ function dialWithTimeout(
   ussdCode: string,
   subscriptionId: number,
   menuInputs: string[],
-  timeoutMs: number
+  timeoutMs: number,
+  // true = strict Sambaza/Airtel transfer-confirmation classifier
+  // (real deliveries must never be reported successful on an
+  // unrecognized/failure response). false = any non-blank response
+  // counts as success, for callers that validate the text themselves.
+  expectSambazaConfirmation: boolean
 ): Promise<{ success: boolean; result: string }> {
   return new Promise((resolve) => {
     let settled = false;
@@ -876,7 +882,8 @@ function dialWithTimeout(
       UssdExecutor.dialUssd(
         ussdCode,
         subscriptionId,
-        menuInputs
+        menuInputs,
+        expectSambazaConfirmation
       );
     } catch (e: any) {
       if (settled) {
@@ -966,7 +973,11 @@ export async function manualDeliver(input: {
 export async function manualDial(
   ussdCode: string,
   subscriptionId: number,
-  menuInputs: string[] = []
+  menuInputs: string[] = [],
+  // Manual test dial from Settings can be any USSD code, not just a
+  // Sambaza delivery — default to lenient (any non-blank response counts)
+  // rather than forcing it through the delivery-only classifier.
+  expectSambazaConfirmation = false
 ) {
   const callOk = await requestCallPermission();
 
@@ -988,6 +999,7 @@ export async function manualDial(
     ussdCode,
     subscriptionId,
     menuInputs,
-    useAppSettingsStore.getState().ussdTimeoutMs
+    useAppSettingsStore.getState().ussdTimeoutMs,
+    expectSambazaConfirmation
   );
 }
