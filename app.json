@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Webazi",
-    "slug": "webazi-ussd-app",
+    "slug": "webazi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/webazi_profile_photo.png",
