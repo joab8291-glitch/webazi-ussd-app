@@ -56,6 +56,7 @@ export default function TabLayout() {
       {/* Reachable via a link from Settings/Airtime Manager, not a bottom tab */}
       <Tabs.Screen name="ussd-scheduler" options={{ href: null }} />
       <Tabs.Screen name="mpesa-messages" options={{ href: null }} />
+      <Tabs.Screen name="notifications" options={{ href: null }} />
     </Tabs>
   );
 }
