@@ -76,4 +76,32 @@ class SmsForegroundService : Service() {
     }
     super.onDestroy()
   }
+
+  /**
+   * Called when the user swipes the app away from Recents. Without this,
+   * Android is free to tear down the whole process — including the
+   * BroadcastReceiver this service exists to keep alive — the moment the
+   * task is removed, regardless of the foreground notification. Restarting
+   * the service here brings the process back so a payment SMS that arrives
+   * right after isn't silently dropped.
+   *
+   * This is a real improvement, not a guarantee: some OEMs (Xiaomi/MIUI,
+   * Oppo, Vivo, Huawei) still kill background processes at the system
+   * level regardless of foreground services, and typically need the user
+   * to manually whitelist the app ("autostart" / disable battery
+   * optimization) in their own settings — see the battery-exemption
+   * functions in SmsListenerModule.kt and the "Background reliability"
+   * section in Settings.
+   */
+  override fun onTaskRemoved(rootIntent: Intent?) {
+    val restartIntent = Intent(applicationContext, SmsForegroundService::class.java)
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      applicationContext.startForegroundService(restartIntent)
+    } else {
+      applicationContext.startService(restartIntent)
+    }
+
+    super.onTaskRemoved(rootIntent)
+  }
 }
