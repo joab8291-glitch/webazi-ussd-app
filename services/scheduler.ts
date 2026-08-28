@@ -11,6 +11,7 @@ import { useScheduleStore } from '../store/useScheduleStore';
 import type { ScheduledDial } from '../store/useScheduleStore';
 import { useActivityStore } from '../store/useActivityStore';
 import { manualDeliver } from './smsAutomation';
+import { runDueFloatChecks } from './floatCheck';
 
 const CHECK_INTERVAL_MS = 30000;
 
@@ -65,6 +66,11 @@ async function runDueSchedules() {
         .getState()
         .recordRun(item.id, result.ok ? 'Queued' : result.reason ?? 'Failed to queue', nextRunAt);
     }
+
+    // Float/balance check — cheap no-op unless checkIntervalHours has
+    // elapsed for a network; shares this same 30s loop rather than
+    // running its own timer.
+    await runDueFloatChecks();
   } finally {
     running = false;
   }
