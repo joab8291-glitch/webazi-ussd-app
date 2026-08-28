@@ -30,6 +30,9 @@ export type LocalTransaction = {
   attempts: number;
   createdAt: string;
   updatedAt: string;
+  /** Same phone + amount as another order within the last 10 minutes.
+   * Flagged for a human glance, never blocks delivery. */
+  possibleDuplicate: boolean;
 };
 
 type State = {
@@ -40,6 +43,7 @@ type State = {
     network: 'safaricom' | 'airtel';
     phone: string;
     amount: number;
+    possibleDuplicate?: boolean;
   }) => string;
   recordDialResult: (id: string, dial: DialResult) => void;
   markCompleted: (id: string) => void;
@@ -58,7 +62,7 @@ export const useTransactionStore = create<State>()(
     (set) => ({
       transactions: [],
 
-      addPending: ({ ref, receipt, network, phone, amount }) => {
+      addPending: ({ ref, receipt, network, phone, amount, possibleDuplicate }) => {
         const id = `${ref}-${Date.now()}`;
         const now = new Date().toISOString();
 
@@ -78,6 +82,7 @@ export const useTransactionStore = create<State>()(
               attempts: 1,
               createdAt: now,
               updatedAt: now,
+              possibleDuplicate: possibleDuplicate ?? false,
             },
             ...s.transactions,
           ],
