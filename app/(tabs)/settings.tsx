@@ -423,6 +423,13 @@ export default function SettingsScreen() {
           gets caught before it causes an outage.
         </Text>
 
+        <ToggleRow
+          label="Notify me when float is low"
+          value={floatStore.notificationsEnabled}
+          onChange={floatStore.setNotificationsEnabled}
+          colors={c}
+        />
+
         <Text style={[styles.label, { color: c.textSecondary }]}>Check every (hours, 0 = off)</Text>
         <TextInput
           value={String(floatStore.checkIntervalHours)}
