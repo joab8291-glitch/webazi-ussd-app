@@ -52,6 +52,7 @@ export default function AirtimeManagerScreen() {
 
   const transactions = useTransactionStore((s) => s.transactions);
   const deleteTransaction = useTransactionStore((s) => s.deleteTransaction);
+  const clearByNetwork = useTransactionStore((s) => s.clearByNetwork);
   const unmatched = useUnmatchedStore((s) => s.items);
   const dismissUnmatched = useUnmatchedStore((s) => s.remove);
 
@@ -99,6 +100,18 @@ export default function AirtimeManagerScreen() {
     Share.share({
       message: `Webazi order ${txn.ref} · KES ${txn.amount} · ${txn.phone} · ${txn.status}`,
     }).catch(() => {});
+  };
+
+  const handleClearAllForNetwork = () => {
+    if (networkTxns.length === 0) return;
+    Alert.alert(
+      `Clear all ${activeNetwork.label} orders?`,
+      'This deletes every order on this tab — including any still pending delivery. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear all', style: 'destructive', onPress: () => clearByNetwork(network) },
+      ]
+    );
   };
 
   return (
@@ -258,9 +271,21 @@ export default function AirtimeManagerScreen() {
               </View>
             )}
 
-            <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>
-              {activeNetwork.label} orders
-            </Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>
+                {activeNetwork.label} orders
+              </Text>
+              <Pressable onPress={handleClearAllForNetwork} hitSlop={8}>
+                <Text
+                  style={{
+                    color: networkTxns.length ? c.error : c.muted,
+                    fontSize: 12,
+                    fontWeight: '600',
+                  }}>
+                  Clear all
+                </Text>
+              </Pressable>
+            </View>
           </View>
         }
         ListEmptyComponent={
