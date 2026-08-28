@@ -138,12 +138,21 @@ export const useTransactionStore = create<State>()(
       },
 
       deleteTransaction: (id) => {
-        set((s) => ({ transactions: s.transactions.filter((t) => t.id !== id) }));
+        set((s) => ({
+          transactions: s.transactions.filter((t) => t.id !== id),
+        }));
       },
 
       purgeOlderThan: (days) => {
         const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-        set((s) => ({ transactions: s.transactions.filter((t) => t.status === 'pending' || new Date(t.createdAt).getTime() >= cutoff) }));
+
+        set((s) => ({
+          // Pending orders are never auto-deleted, regardless of age —
+          // only resolved (completed/failed) ones get purged.
+          transactions: s.transactions.filter(
+            (t) => t.status === 'pending' || new Date(t.createdAt).getTime() >= cutoff
+          ),
+        }));
       },
     }),
     {
