@@ -115,7 +115,10 @@ export async function checkFloatBalance(network: NetworkKey): Promise<void> {
       }, timeoutMs);
 
       try {
-        UssdExecutor.dialUssd(BALANCE_USSD[network], executionSubId, []);
+        // false: this is a balance query, not a Sambaza delivery — don't
+        // run the response through the delivery-confirmation classifier.
+        // parseBalanceResponse() below does the real validation.
+        UssdExecutor.dialUssd(BALANCE_USSD[network], executionSubId, [], false);
       } catch (e: any) {
         if (settled) return;
         settled = true;
