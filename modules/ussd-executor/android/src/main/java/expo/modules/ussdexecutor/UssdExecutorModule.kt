@@ -113,7 +113,8 @@ class UssdExecutorModule : Module() {
     Function("dialUssd") {
       ussdCode: String,
       subscriptionId: Int,
-      menuInputs: List<String> ->
+      menuInputs: List<String>,
+      expectSambazaConfirmation: Boolean ->
 
       val context = appContext.reactContext
 
@@ -167,7 +168,24 @@ class UssdExecutorModule : Module() {
 
       UssdAccessibilityService.onResult = { resultText ->
 
-        val classification = classifyUssdResult(resultText)
+        /*
+         * expectSambazaConfirmation=true (delivery dials): run the strict
+         * Sambaza/Airtel transfer-confirmation classifier below — a
+         * financial delivery must never be reported successful on an
+         * unrecognized or failure response.
+         *
+         * expectSambazaConfirmation=false (e.g. a balance/status query,
+         * or the manual USSD test tool): the caller does its own semantic
+         * validation of the response text (see parseBalanceResponse in
+         * floatCheck.ts) — we only report whether a response was
+         * captured at all, without forcing it through a classifier that
+         * only knows about Sambaza/Airtel transfer wording.
+         */
+        val classification = if (expectSambazaConfirmation) {
+          classifyUssdResult(resultText)
+        } else {
+          Pair(resultText.isNotBlank(), resultText)
+        }
 
         sendEvent(
           "onUssdResult",
