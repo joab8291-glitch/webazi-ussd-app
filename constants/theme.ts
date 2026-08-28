@@ -1,50 +1,82 @@
 /**
  * Webazi brand theme — light & dark
+ * Palette matches the approved "v2" Home mockup (greeting header, hero
+ * card, floating pill tab bar).
  */
 
 import { Platform } from 'react-native';
-
-const brandGreen = '#00A86B';
-const brandDark = '#0B1F17';
-const brandLight = '#F0FDF6';
-const accent = '#FFB020';
 
 export const Colors = {
   light: {
     text: '#0B1F17',
     textSecondary: '#5A6B63',
-    background: '#F7FAF8',
+    background: '#F4FAF7',
     surface: '#FFFFFF',
-    surfaceAlt: '#E8F5EE',
-    tint: brandGreen,
-    accent,
+    surfaceAlt: '#E7F5EE',
+    tint: '#0C9A63',
+    tintDeep: '#0B7F52',
+    accent: '#D99A1F',
     icon: '#5A6B63',
     tabIconDefault: '#8A9A92',
-    tabIconSelected: brandGreen,
-    success: '#00A86B',
-    warning: '#FFB020',
-    error: '#E5484D',
-    border: '#D8E5DE',
-    muted: '#9AABA3',
+    tabIconSelected: '#0C9A63',
+    success: '#16A34A',
+    warning: '#CA8A04',
+    error: '#DC2626',
+    border: '#DCEAE2',
+    muted: '#93A79C',
+    onTint: '#FFFFFF',
   },
   dark: {
-    text: '#E8F5EE',
-    textSecondary: '#9AABA3',
-    background: brandDark,
-    surface: '#12261D',
-    surfaceAlt: '#1A3228',
-    tint: '#2DD4A0',
-    accent,
-    icon: '#9AABA3',
-    tabIconDefault: '#6B7C74',
-    tabIconSelected: '#2DD4A0',
-    success: '#2DD4A0',
-    warning: '#FFB020',
-    error: '#FF6B6B',
-    border: '#1F3A2E',
-    muted: '#6B7C74',
+    text: '#F1F7F3',
+    textSecondary: '#9FB3A8',
+    background: '#081712',
+    surface: '#102820',
+    surfaceAlt: '#1A3B2A',
+    tint: '#16C784',
+    tintDeep: '#0E9F6E',
+    accent: '#F4B942',
+    icon: '#9FB3A8',
+    tabIconDefault: '#657A6E',
+    tabIconSelected: '#16C784',
+    success: '#22C55E',
+    warning: '#F4B942',
+    error: '#F0556B',
+    border: '#21402F',
+    muted: '#657A6E',
+    onTint: '#06150F',
   },
 };
+
+/** Gradient stop pairs for LinearGradient — used for the avatar mark,
+ * the primary pill CTA, and the active floating-tab-bar pill. */
+export const Gradients = {
+  light: { tint: ['#0C9A63', '#0B7F52'] as const },
+  dark: { tint: ['#16C784', '#0E9F6E'] as const },
+};
+
+/** Adds an alpha channel to a 6-digit hex color, e.g. withAlpha('#22C55E', 0.16). */
+export function withAlpha(hex: string, alpha: number) {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Consistent card elevation across iOS/Android/web. */
+export function cardShadow(elevated = true) {
+  if (!elevated) return {};
+  return Platform.select({
+    web: { boxShadow: '0 10px 24px -8px rgba(0,0,0,0.35)' },
+    default: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.25,
+      shadowRadius: 16,
+      elevation: 6,
+    },
+  });
+}
 
 export const Fonts = Platform.select({
   ios: {
