@@ -19,6 +19,9 @@ import { useUnmatchedStore } from '@/store/useUnmatchedStore';
 import type { UnmatchedSms } from '@/store/useUnmatchedStore';
 import { retryDelivery, manualDeliver } from '@/services/smsAutomation';
 import { openWhatsAppChat } from '@/services/whatsapp';
+import { exportOrdersCsv } from '@/services/exportCsv';
+import { useFloatStore } from '@/store/useFloatStore';
+import { checkFloatBalance, BALANCE_USSD } from '@/services/floatCheck';
 import { Link } from 'expo-router';
 
 type Network = 'safaricom' | 'airtel';
@@ -88,6 +91,15 @@ export default function AirtimeManagerScreen() {
   const executionSubId = network === 'safaricom' ? safaricomExecutionSubscriptionId : airtelExecutionSubscriptionId;
   const setExecutionSim = network === 'safaricom' ? setSafaricomExecutionSim : setAirtelExecutionSim;
   const activeNetwork = NETWORKS.find((n) => n.key === network)!;
+
+  const floatReading = useFloatStore((s) => s[network]);
+  const lowBalanceThreshold = useFloatStore((s) => s.lowBalanceThreshold);
+  const floatLow = floatReading.balance != null && floatReading.balance < lowBalanceThreshold;
+
+  const handleExportCsv = () => {
+    if (networkTxns.length === 0) return;
+    exportOrdersCsv(networkTxns, `${activeNetwork.label} orders`).catch(() => {});
+  };
 
   const handleDelete = (txn: LocalTransaction) => {
     Alert.alert('Delete order?', `KES ${txn.amount} to ${txn.phone} (${txn.ref})`, [
@@ -192,6 +204,46 @@ export default function AirtimeManagerScreen() {
               )}
             </View>
 
+            {/* Float / airtime balance */}
+            <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+              <View style={styles.cardTop}>
+                <Text style={[styles.cardTitle, { color: c.text }]}>
+                  {activeNetwork.label} float
+                </Text>
+                <Pressable
+                  onPress={() => checkFloatBalance(network)}
+                  disabled={floatReading.checking}
+                  style={[styles.actionBtn, { borderColor: c.border, opacity: floatReading.checking ? 0.6 : 1 }]}>
+                  <Text style={{ color: c.tint, fontSize: 12, fontWeight: '600' }}>
+                    {floatReading.checking ? 'Checking…' : 'Check now'}
+                  </Text>
+                </Pressable>
+              </View>
+              <Text
+                style={{
+                  color: floatLow ? c.error : c.text,
+                  fontSize: 26,
+                  fontWeight: '800',
+                  marginTop: 2,
+                }}>
+                {floatReading.balance != null ? `KES ${floatReading.balance}` : '—'}
+              </Text>
+              <Text style={{ color: c.textSecondary, fontSize: 11 }}>
+                Balance on the execution SIM · dials {BALANCE_USSD[network]}
+                {floatReading.checkedAt
+                  ? ` · checked ${new Date(floatReading.checkedAt).toLocaleString()}`
+                  : ' · not checked yet'}
+              </Text>
+              {floatLow && (
+                <Text style={{ color: c.error, fontSize: 12, fontWeight: '600' }}>
+                  ⚠ Below KES {lowBalanceThreshold} — top up this SIM before delivery dials start failing.
+                </Text>
+              )}
+              {floatReading.lastError && (
+                <Text style={{ color: c.warning, fontSize: 11 }}>{floatReading.lastError}</Text>
+              )}
+            </View>
+
             {/* Search */}
             <TextInput
               value={search}
@@ -275,16 +327,28 @@ export default function AirtimeManagerScreen() {
               <Text style={[styles.sectionLabel, { color: c.textSecondary }]}>
                 {activeNetwork.label} orders
               </Text>
-              <Pressable onPress={handleClearAllForNetwork} hitSlop={8}>
-                <Text
-                  style={{
-                    color: networkTxns.length ? c.error : c.muted,
-                    fontSize: 12,
-                    fontWeight: '600',
-                  }}>
-                  Clear all
-                </Text>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: 14 }}>
+                <Pressable onPress={handleExportCsv} hitSlop={8}>
+                  <Text
+                    style={{
+                      color: networkTxns.length ? c.tint : c.muted,
+                      fontSize: 12,
+                      fontWeight: '600',
+                    }}>
+                    Export CSV
+                  </Text>
+                </Pressable>
+                <Pressable onPress={handleClearAllForNetwork} hitSlop={8}>
+                  <Text
+                    style={{
+                      color: networkTxns.length ? c.error : c.muted,
+                      fontSize: 12,
+                      fontWeight: '600',
+                    }}>
+                    Clear all
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         }
@@ -447,6 +511,14 @@ function TxnCard({
           </Pressable>
         </View>
       </View>
+
+      {txn.possibleDuplicate && (
+        <View style={[styles.badge, { backgroundColor: colors.warning + '22', alignSelf: 'flex-start' }]}>
+          <Text style={{ color: colors.warning, fontSize: 10, fontWeight: '700' }}>
+            ⚠ SAME PHONE + AMOUNT WITHIN 10 MIN
+          </Text>
+        </View>
+      )}
 
       {menuOpen && (
         <View style={[styles.menu, { backgroundColor: colors.background, borderColor: colors.border }]}>
