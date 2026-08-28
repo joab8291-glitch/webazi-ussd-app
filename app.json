@@ -8,11 +8,10 @@
     "scheme": "webaziussdapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.webazi.ussdapp"
     },
-
     "android": {
       "package": "com.webazi.ussdapp",
       "adaptiveIcon": {
@@ -37,12 +36,10 @@
         "WAKE_LOCK"
       ]
     },
-
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-
     "plugins": [
       "expo-router",
       "expo-dev-client",
@@ -59,12 +56,10 @@
         }
       ]
     ],
-
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-
     "extra": {
       "router": {},
       "eas": {
