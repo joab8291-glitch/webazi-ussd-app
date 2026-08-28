@@ -23,6 +23,16 @@ const MAPPING = {
   'simcard.fill': 'sim-card',
   'eye.fill': 'visibility',
   'eye.slash.fill': 'visibility-off',
+  // Added for the v2 Home redesign (greeting header, hero card, status
+  // ring row, quick-action tiles, activity rows, floating tab bar).
+  'bell.fill': 'notifications',
+  'accessibility.fill': 'accessibility-new',
+  'antenna.radiowaves.left.and.right': 'sms',
+  'checkmark.circle.fill': 'check-circle',
+  'clock.fill': 'schedule',
+  'arrow.triangle.2.circlepath': 'autorenew',
+  'tray.fill': 'inbox',
+  'exclamationmark.circle.fill': 'error',
 } as IconMapping;
 
 /**
