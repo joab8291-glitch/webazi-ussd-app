@@ -95,6 +95,33 @@ class SmsListenerModule : Module() {
       context.stopService(Intent(context, SmsForegroundService::class.java))
     }
 
+    // Whether the app is currently exempt from Android's battery
+    // optimizations (Doze/App Standby). Even with the foreground service
+    // and onTaskRemoved() restart in place, several OEMs still throttle or
+    // kill background processes unless this exemption is granted.
+    Function("isIgnoringBatteryOptimizations") {
+      val context = appContext.reactContext ?: return@Function false
+      val powerManager =
+        context.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+      powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+    }
+
+    // Opens the system dialog asking the user to exempt this app from
+    // battery optimizations. Requires the REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+    // permission (declared in AndroidManifest.xml) — Google Play policy
+    // restricts this to apps with a genuine background-service need, which
+    // applies here (the SMS listener has to keep running to catch payments).
+    Function("requestIgnoreBatteryOptimizations") {
+      val context = appContext.reactContext ?: return@Function null
+
+      val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+        data = android.net.Uri.parse("package:${context.packageName}")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+
+      context.startActivity(intent)
+    }
+
     // Scans the device's actual SMS inbox for messages received on the given
     // subscription since `sinceMillis`, for the "missed messages while the
     // app/process was killed" recovery path. Requires READ_SMS (already
