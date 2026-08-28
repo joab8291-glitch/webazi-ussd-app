@@ -153,8 +153,26 @@ class UssdAccessibilityService : AccessibilityService() {
      * Now we are waiting for the carrier's final response.
      *
      * Only invoke onResult after we have a meaningful final dialog.
+     *
+     * IMPORTANT — transient placeholder dialog:
+     * Right after ACTION_CALL is placed, Android shows a brief system
+     * dialog with placeholder text like "Running USSD code..." before
+     * it's replaced by the real carrier response. When there are no
+     * menu inputs (e.g. a balance check), waitingForFinalResult is true
+     * from the start of the request, so without this check that
+     * placeholder — not the real response — would be captured as the
+     * "final" result, and the service would stop listening before the
+     * actual response (and its OK button) ever appeared.
      */
     if (waitingForFinalResult) {
+      if (isTransientPlaceholder(dialogText)) {
+        Log.d(
+          TAG,
+          "Ignoring transient USSD placeholder: $dialogText"
+        )
+        return
+      }
+
       Log.d(
         TAG,
         "Final USSD response detected: $dialogText"
@@ -176,6 +194,22 @@ class UssdAccessibilityService : AccessibilityService() {
        */
       clickSendButton(rootNode)
     }
+  }
+
+  /**
+   * True for the brief system placeholder Android shows immediately
+   * after a USSD call is placed (e.g. "Running USSD code..." /
+   * "Running the request..."), before the carrier's real response
+   * replaces it. Never a legitimate carrier answer — extend this list
+   * if other OEM dialers show a different transient message.
+   */
+  private fun isTransientPlaceholder(text: String): Boolean {
+    val lower = text.lowercase()
+
+    return lower.contains("running ussd code") ||
+      lower.contains("running the request") ||
+      lower.contains("running...") ||
+      (lower.contains("running") && lower.contains("ussd"))
   }
 
   override fun onInterrupt() {
