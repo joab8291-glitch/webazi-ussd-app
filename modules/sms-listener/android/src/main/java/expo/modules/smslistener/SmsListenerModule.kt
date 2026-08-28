@@ -78,7 +78,7 @@ class SmsListenerModule : Module() {
     // Starts the foreground service that keeps this module's BroadcastReceiver
     // alive in the background. Safe to call even if already running.
     Function("startForegroundService") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
 
       val intent = Intent(context, SmsForegroundService::class.java)
 
@@ -91,7 +91,7 @@ class SmsListenerModule : Module() {
 
     // Stops the foreground service.
     Function("stopForegroundService") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
       context.stopService(Intent(context, SmsForegroundService::class.java))
     }
 
