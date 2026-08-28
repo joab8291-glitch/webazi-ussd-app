@@ -17,6 +17,7 @@ import { useFloatStore } from '../store/useFloatStore';
 import type { NetworkKey } from '../store/useFloatStore';
 import { useActivityStore } from '../store/useActivityStore';
 import { useAppSettingsStore } from '../store/useAppSettingsStore';
+import { notifyLowFloat } from './floatNotifications';
 
 export const BALANCE_USSD: Record<NetworkKey, string> = {
   safaricom: '*144#',
@@ -146,6 +147,18 @@ export async function checkFloatBalance(network: NetworkKey): Promise<void> {
         'error',
         `Low ${network} float: KES ${balance} (below KES ${threshold} threshold) — top up the execution SIM`
       );
+
+      // Edge-triggered: fire once per dip, not on every check while it
+      // stays low. recordReading() (called just above) already reset
+      // lowAlerted[network] to false the moment balance was last seen
+      // at/above threshold, so this only fires on a fresh dip.
+      const { notificationsEnabled, lowAlerted } = useFloatStore.getState();
+      if (notificationsEnabled && !lowAlerted[network]) {
+        useFloatStore.setState((s) => ({ lowAlerted: { ...s.lowAlerted, [network]: true } }));
+        notifyLowFloat(network, balance, threshold).catch((e) =>
+          log('warn', `Could not send low-float notification: ${String(e?.message ?? e)}`)
+        );
+      }
     } else {
       log('info', `${network} float: KES ${balance}`);
     }
