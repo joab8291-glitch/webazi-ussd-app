@@ -44,6 +44,14 @@
       "expo-router",
       "expo-dev-client",
       [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/webazi_profile_photo.png",
+          "color": "#FF3B30",
+          "defaultChannel": "webazi_float_alerts"
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/webazi_profile_photo.png",
