@@ -68,11 +68,11 @@ class UssdExecutorModule : Module() {
     // Some devices silently drop the accessibility events used to walk a
     // multi-step USSD menu if the screen sleeps mid-session.
     Function("acquireDialWakeLock") {
-      val context = appContext.reactContext ?: return@Function
+      val context = appContext.reactContext ?: return@Function null
 
       try {
         if (dialWakeLock?.isHeld == true) {
-          return@Function
+          return@Function null
         }
 
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
