@@ -95,6 +95,24 @@ export async function checkFloatBalance(network: NetworkKey): Promise<void> {
       return;
     }
 
+    /**
+     * Close any lingering USSD dialog before dialing — mirrors the same
+     * safeguard autoDial() uses for delivery dials. Without this, running
+     * checkAllFloatBalances() (Safaricom immediately followed by Airtel,
+     * with no gap) can start the second dial while the first network's
+     * dialog is still settling/dismissing, and the accessibility service
+     * can pick up leftover UI from that transition as the "final" result.
+     * Requires a native rebuild — safe to call even if not yet present.
+     */
+    const settings = useAppSettingsStore.getState();
+    if (settings.autoCloseUssdDialogs && typeof UssdExecutor.closeLingeringUssdDialog === 'function') {
+      try {
+        UssdExecutor.closeLingeringUssdDialog();
+      } catch {
+        // Non-fatal — proceed with the check regardless.
+      }
+    }
+
     const outcome = await new Promise<{ success: boolean; result: string }>((resolve) => {
       let settled = false;
       const timeoutMs = useAppSettingsStore.getState().ussdTimeoutMs;
@@ -173,6 +191,13 @@ export async function checkFloatBalance(network: NetworkKey): Promise<void> {
 
 export async function checkAllFloatBalances(): Promise<void> {
   await checkFloatBalance('safaricom');
+
+  // Small gap before the second network's dial — gives the first
+  // dialog's auto-dismiss (tap + window teardown) time to fully settle
+  // before the next ACTION_CALL fires, on top of the closeLingeringUssdDialog()
+  // safeguard above.
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+
   await checkFloatBalance('airtel');
 }
 
