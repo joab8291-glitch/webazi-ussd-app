@@ -15,6 +15,8 @@
  * the paid amount shown elsewhere in the SMS.
  */
 
+import { normalizeToLocal } from './phone';
+
 export type DecodedRef = {
   network: 'safaricom' | 'airtel';
   amount: number;
@@ -51,6 +53,53 @@ export function extractAccountRef(smsBody: string): string | null {
   return match ? match[1] : null;
 }
 
+export type DecodedPaybill = {
+  network: 'safaricom' | 'airtel';
+  amount: number;
+  phone: string; // local format, e.g. 0729914983
+  ref: string; // e.g. "S0729914983" — for display/logging alongside the receipt
+};
+
+const PAYBILL_ACCOUNT_PATTERN = /Account Number\s+([SA])\s*(\d{9,10})/i;
+const PAYBILL_AMOUNT_PATTERN = /Ksh\s*([\d,]+(?:\.\d+)?)\s+received/i;
+
+/**
+ * Decodes a manual Paybill payment confirmation SMS — the shape you get
+ * when a customer pays your Paybill directly and types their own phone
+ * number into the Account Number field, prefixed with S (Safaricom) or
+ * A (Airtel) so we know which network to dial from:
+ *
+ *   "UHQO43V4WF Confirmed. on 26/8/26 at 4:09 PM Ksh100.00 received from
+ *    JOAB IRUNGU NDEGO 254729914983. Account Number S0729914983 New
+ *    Utility balance is Ksh100.00"
+ *
+ * This is structurally different from decodeAccountRef() above: there's
+ * no compact generated ref, just a raw phone number and the paid amount
+ * stated directly in the SMS. Returns null if either piece is missing
+ * or unparseable — callers should fall back to the "unmatched" bucket.
+ */
+export function decodePaybillSms(smsBody: string): DecodedPaybill | null {
+  const acctMatch = smsBody.match(PAYBILL_ACCOUNT_PATTERN);
+  if (!acctMatch) return null;
+
+  const [, prefix, rawNumber] = acctMatch;
+  const phone = normalizeToLocal(rawNumber);
+  if (!phone) return null;
+
+  const amtMatch = smsBody.match(PAYBILL_AMOUNT_PATTERN);
+  if (!amtMatch) return null;
+
+  const amount = Math.round(parseFloat(amtMatch[1].replace(/,/g, '')));
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  return {
+    network: prefix.toUpperCase() === 'A' ? 'airtel' : 'safaricom',
+    amount,
+    phone,
+    ref: `${prefix.toUpperCase()}${rawNumber.replace(/\D/g, '')}`,
+  };
+}
+
 /**
  * Pulls the M-PESA receipt code from the start of a confirmation SMS
  * (e.g. "UHOO43KO9X Confirmed. You have received..."). Purely for
@@ -61,7 +110,11 @@ export function extractReceipt(smsBody: string): string | null {
   return match ? match[1].toUpperCase() : null;
 }
 
-/** Normalizes a local (0...) phone number to 2547.../2541... for USSD "pn" fields. */
+/**
+ * Normalizes a local (0...) phone number to 2547.../2541....
+ * @deprecated USSD dialing now uses local format directly (see services/phone.ts
+ * and sambaza.ts) — kept only so nothing that still imports this breaks.
+ */
 export function toMsisdn(localPhone: string): string {
   if (localPhone.startsWith('0')) return '254' + localPhone.slice(1);
   return localPhone;
