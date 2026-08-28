@@ -47,6 +47,10 @@ type State = {
   bumpAttempts: (id: string) => void;
   deleteTransaction: (id: string) => void;
   purgeOlderThan: (days: number) => void;
+  /** Deletes every order, including pending ones. Used by the "Clear all" buttons. */
+  clearAll: () => void;
+  /** Deletes every order for one network, including pending ones. */
+  clearByNetwork: (network: 'safaricom' | 'airtel') => void;
 };
 
 export const useTransactionStore = create<State>()(
@@ -140,6 +144,16 @@ export const useTransactionStore = create<State>()(
       deleteTransaction: (id) => {
         set((s) => ({
           transactions: s.transactions.filter((t) => t.id !== id),
+        }));
+      },
+
+      clearAll: () => {
+        set({ transactions: [] });
+      },
+
+      clearByNetwork: (network) => {
+        set((s) => ({
+          transactions: s.transactions.filter((t) => t.network !== network),
         }));
       },
 
