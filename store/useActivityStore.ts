@@ -7,11 +7,22 @@ export type ActivityEntry = {
   level: LogLevel;
   message: string;
   timestamp: number;
+  // Optional — only present when the log is about a specific order
+  // (SMS decoded, dial confirmed, delivery succeeded/failed, retry
+  // scheduled). Lets the Home Activity list show a real trailing amount
+  // instead of dropping the column.
+  amount?: number;
+  phone?: string;
+};
+
+type LogMeta = {
+  amount?: number;
+  phone?: string;
 };
 
 type State = {
   logs: ActivityEntry[];
-  addLog: (level: LogLevel, message: string) => void;
+  addLog: (level: LogLevel, message: string, meta?: LogMeta) => void;
   clear: () => void;
 };
 
@@ -19,7 +30,7 @@ const MAX_LOGS = 200;
 
 export const useActivityStore = create<State>((set) => ({
   logs: [],
-  addLog: (level, message) =>
+  addLog: (level, message, meta) =>
     set((s) => ({
       logs: [
         {
@@ -27,6 +38,8 @@ export const useActivityStore = create<State>((set) => ({
           level,
           message,
           timestamp: Date.now(),
+          amount: meta?.amount,
+          phone: meta?.phone,
         },
         ...s.logs,
       ].slice(0, MAX_LOGS),
