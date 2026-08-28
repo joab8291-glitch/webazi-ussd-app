@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Colors, withAlpha } from '@/constants/theme';
@@ -22,8 +22,20 @@ export default function NotificationsScreen() {
   const c = Colors[scheme];
   const insets = useSafeAreaInsets();
 
-  const { transactions } = useTransactionStore();
+  const { transactions, clearAll } = useTransactionStore();
   const [filter, setFilter] = useState<FilterKey>('all');
+
+  const handleClearAll = () => {
+    if (transactions.length === 0) return;
+    Alert.alert(
+      'Clear all notifications?',
+      'This deletes every order shown here — including any still pending delivery. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear all', style: 'destructive', onPress: () => clearAll() },
+      ]
+    );
+  };
 
   const filtered = useMemo(() => {
     if (filter === 'all') return transactions;
@@ -46,7 +58,16 @@ export default function NotificationsScreen() {
           <Text style={{ color: c.tint, fontSize: 16 }}>‹ Back</Text>
         </Pressable>
         <Text style={[styles.title, { color: c.text }]}>Notifications</Text>
-        <View style={{ width: 40 }} />
+        <Pressable onPress={handleClearAll} hitSlop={12} style={{ width: 64, alignItems: 'flex-end' }}>
+          <Text
+            style={{
+              color: transactions.length ? c.error : c.muted,
+              fontSize: 13,
+              fontWeight: '600',
+            }}>
+            Clear all
+          </Text>
+        </Pressable>
       </View>
 
       <View style={styles.filterRow}>
