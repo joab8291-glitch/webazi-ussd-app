@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -38,14 +39,16 @@ export default function SettingsScreen() {
   const [newSender, setNewSender] = useState('');
   const [scanning, setScanning] = useState(false);
 
-  useEffect(() => {
-    refreshSimSlots();
-    try {
-      setA11y(UssdExecutor.isAccessibilityEnabled());
-    } catch {
-      setA11y(false);
-    }
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      refreshSimSlots();
+      try {
+        setA11y(UssdExecutor.isAccessibilityEnabled());
+      } catch {
+        setA11y(false);
+      }
+    }, [])
+  );
 
   return (
     <ScrollView
