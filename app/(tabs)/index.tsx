@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -48,12 +48,6 @@ export default function HomeScreen() {
 
   const [a11yOk, setA11yOk] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const scrollRef = useRef<ScrollView>(null);
-  const [activityY, setActivityY] = useState(0);
-
-  const scrollToActivity = () => {
-    scrollRef.current?.scrollTo({ y: activityY, animated: true });
-  };
 
   const pendingCount = transactions.filter((t) => t.status === 'pending').length;
   const completedCount = transactions.filter((t) => t.status === 'completed').length;
@@ -144,7 +138,7 @@ export default function HomeScreen() {
           </View>
         </View>
         <Pressable
-          onPress={scrollToActivity}
+          onPress={() => router.push('/notifications')}
           style={[styles.bell, { backgroundColor: c.surface, borderColor: c.border }]}>
           {failedCount > 0 && (
             <View style={[styles.badge, { backgroundColor: c.error, borderColor: c.surface }]} />
@@ -289,9 +283,7 @@ export default function HomeScreen() {
       </View>
 
       {/* Activity */}
-      <View
-        onLayout={(e) => setActivityY(e.nativeEvent.layout.y)}
-        style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }, cardShadow()]}>
+      <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }, cardShadow()]}>
         <View style={styles.logHeader}>
           <Text style={[styles.cardTitle, { color: c.text }]}>Activity</Text>
           <Pressable onPress={clearLogs}>
