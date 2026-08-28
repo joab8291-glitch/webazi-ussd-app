@@ -24,6 +24,8 @@ import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
 import SmsListener from '@/modules/sms-listener/src/SmsListenerModule';
 import { WHATSAPP_WEBHOOK_NOTES } from '@/services/whatsapp';
 import { useActivityStore } from '@/store/useActivityStore';
+import { useFloatStore } from '@/store/useFloatStore';
+import { checkAllFloatBalances } from '@/services/floatCheck';
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? 'light';
@@ -34,6 +36,8 @@ export default function SettingsScreen() {
   const wa = useWhatsAppStore();
   const log = useActivityStore((s) => s.addLog);
   const appSettings = useAppSettingsStore();
+  const floatStore = useFloatStore();
+  const [checkingFloat, setCheckingFloat] = useState(false);
 
   const [testCode, setTestCode] = useState('*334#');
   const [a11y, setA11y] = useState<boolean | null>(null);
@@ -290,20 +294,29 @@ export default function SettingsScreen() {
         />
         {appSettings.autoRetryEnabled && (
           <>
-            <Text style={[styles.label, { color: c.textSecondary }]}>Retry delay (seconds)</Text>
+            <Text style={[styles.label, { color: c.textSecondary }]}>Retry backoff (minutes)</Text>
             <TextInput
-              value={String(Math.round(appSettings.autoRetryDelayMs / 1000))}
+              value={appSettings.autoRetryBackoffMs.map((ms) => Math.round(ms / 60000)).join(', ')}
               onChangeText={(v) => {
-                const n = Number(v);
-                if (Number.isFinite(n)) appSettings.setAutoRetryDelayMs(n * 1000);
+                const parsed = v
+                  .split(',')
+                  .map((s) => Number(s.trim()))
+                  .filter((n) => Number.isFinite(n) && n > 0)
+                  .map((n) => n * 60000);
+                if (parsed.length > 0) appSettings.setAutoRetryBackoffMs(parsed);
               }}
-              keyboardType="numeric"
+              placeholder="2, 5, 15"
+              placeholderTextColor={c.muted}
+              keyboardType="numbers-and-punctuation"
               style={[
                 styles.input,
                 { backgroundColor: c.background, borderColor: c.border, color: c.text },
               ]}
             />
-            <Text style={{ color: c.muted, fontSize: 11 }}>Up to 3 automatic attempts per order.</Text>
+            <Text style={{ color: c.muted, fontSize: 11 }}>
+              One retry per value, in order — {appSettings.autoRetryBackoffMs.length} automatic
+              attempts per failed order, then it's left failed with a notification.
+            </Text>
           </>
         )}
 
@@ -400,6 +413,80 @@ export default function SettingsScreen() {
             <Text style={{ color: c.tint, fontWeight: '600' }}>Open MPESA Messages log</Text>
           </Pressable>
         </Link>
+      </Section>
+
+      {/* Float / airtime balance */}
+      <Section title="Float Balance" colors={c}>
+        <Text style={{ color: c.textSecondary, fontSize: 13, marginBottom: 4 }}>
+          Periodically dials each network's balance-enquiry code (Safaricom *144#, Airtel *133#)
+          on that execution SIM, so a low float — which makes delivery dials silently fail —
+          gets caught before it causes an outage.
+        </Text>
+
+        <Text style={[styles.label, { color: c.textSecondary }]}>Check every (hours, 0 = off)</Text>
+        <TextInput
+          value={String(floatStore.checkIntervalHours)}
+          onChangeText={(v) => {
+            const n = Number(v);
+            if (Number.isFinite(n)) floatStore.setCheckIntervalHours(n);
+          }}
+          keyboardType="numeric"
+          style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+        />
+
+        <Text style={[styles.label, { color: c.textSecondary }]}>Low-balance threshold (KES)</Text>
+        <TextInput
+          value={String(floatStore.lowBalanceThreshold)}
+          onChangeText={(v) => {
+            const n = Number(v);
+            if (Number.isFinite(n)) floatStore.setLowBalanceThreshold(n);
+          }}
+          keyboardType="numeric"
+          style={[styles.input, { backgroundColor: c.background, borderColor: c.border, color: c.text }]}
+        />
+
+        <Text style={{ color: c.muted, fontSize: 11 }}>
+          Safaricom: {floatStore.safaricom.balance != null ? `KES ${floatStore.safaricom.balance}` : '—'}
+          {'  ·  '}
+          Airtel: {floatStore.airtel.balance != null ? `KES ${floatStore.airtel.balance}` : '—'}
+        </Text>
+
+        <Pressable
+          onPress={async () => {
+            setCheckingFloat(true);
+            try {
+              await checkAllFloatBalances();
+            } finally {
+              setCheckingFloat(false);
+            }
+          }}
+          disabled={checkingFloat}
+          style={[styles.outlineBtn, { borderColor: c.border }]}>
+          <Text style={{ color: c.tint, fontWeight: '600' }}>
+            {checkingFloat ? 'Checking…' : 'Check both now'}
+          </Text>
+        </Pressable>
+      </Section>
+
+      {/* Daily / weekly summary */}
+      <Section title="Summary" colors={c}>
+        <Text style={{ color: c.textSecondary, fontSize: 13, marginBottom: 4 }}>
+          Shown automatically when you open the app, if a day/week has passed since the last one —
+          there's no background task runner installed, so it can't be pushed while the app is closed.
+        </Text>
+
+        <ToggleRow
+          label="Daily summary"
+          value={appSettings.dailySummaryEnabled}
+          onChange={appSettings.setDailySummaryEnabled}
+          colors={c}
+        />
+        <ToggleRow
+          label="Weekly summary"
+          value={appSettings.weeklySummaryEnabled}
+          onChange={appSettings.setWeeklySummaryEnabled}
+          colors={c}
+        />
       </Section>
 
       {/* USSD Scheduler */}
