@@ -21,6 +21,7 @@ import { manualDial } from '@/services/smsAutomation';
 import { scanMissedMessages } from '@/services/missedMessages';
 import { Link } from 'expo-router';
 import UssdExecutor from '@/modules/ussd-executor/src/UssdExecutorModule';
+import SmsListener from '@/modules/sms-listener/src/SmsListenerModule';
 import { WHATSAPP_WEBHOOK_NOTES } from '@/services/whatsapp';
 import { useActivityStore } from '@/store/useActivityStore';
 
@@ -36,6 +37,7 @@ export default function SettingsScreen() {
 
   const [testCode, setTestCode] = useState('*334#');
   const [a11y, setA11y] = useState<boolean | null>(null);
+  const [batteryExempt, setBatteryExempt] = useState<boolean | null>(null);
   const [newSender, setNewSender] = useState('');
   const [scanning, setScanning] = useState(false);
 
@@ -46,6 +48,15 @@ export default function SettingsScreen() {
         setA11y(UssdExecutor.isAccessibilityEnabled());
       } catch {
         setA11y(false);
+      }
+      try {
+        setBatteryExempt(
+          typeof SmsListener.isIgnoringBatteryOptimizations === 'function'
+            ? SmsListener.isIgnoringBatteryOptimizations()
+            : null
+        );
+      } catch {
+        setBatteryExempt(null);
       }
     }, [])
   );
@@ -118,6 +129,39 @@ export default function SettingsScreen() {
           style={[styles.outlineBtn, { borderColor: c.border }]}>
           <Text style={{ color: c.tint, fontWeight: '600' }}>Open accessibility settings</Text>
         </Pressable>
+      </Section>
+
+      {/* Background reliability */}
+      <Section title="Background reliability" colors={c}>
+        <Text style={{ color: c.textSecondary, fontSize: 13 }}>
+          Status:{' '}
+          {batteryExempt == null
+            ? 'Unknown — needs a native rebuild'
+            : batteryExempt
+              ? 'Battery optimization disabled ✓'
+              : 'Battery optimization is ON — Android may kill the listener in the background'}
+        </Text>
+        <Pressable
+          onPress={() => {
+            try {
+              if (typeof SmsListener.requestIgnoreBatteryOptimizations === 'function') {
+                SmsListener.requestIgnoreBatteryOptimizations();
+              } else {
+                Alert.alert('Rebuild required', 'This needs a native rebuild before it can be used.');
+              }
+            } catch (e: any) {
+              Alert.alert('Error', String(e?.message ?? e));
+            }
+          }}
+          style={[styles.outlineBtn, { borderColor: c.border }]}>
+          <Text style={{ color: c.tint, fontWeight: '600' }}>Disable battery optimization</Text>
+        </Pressable>
+        <Text style={{ color: c.muted, fontSize: 11, lineHeight: 16 }}>
+          The SMS listener also restarts itself if the app is swiped away from Recents. Some phone
+          makers (Xiaomi/MIUI, Oppo, Vivo, Huawei) still throttle background apps even with this
+          granted — you may also need to enable "Autostart" for Webazi in their own battery settings.
+          No app can fully guarantee this from code.
+        </Text>
       </Section>
 
       {/* Manual USSD test */}
