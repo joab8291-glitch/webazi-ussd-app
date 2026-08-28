@@ -41,6 +41,13 @@ type State = {
   checkIntervalHours: number;
   setCheckIntervalHours: (hours: number) => void;
 
+  // Local push alert when a network's float drops below the threshold.
+  // Fires once per dip — cleared automatically once balance recovers
+  // back above lowBalanceThreshold, so it can fire again on a future dip.
+  notificationsEnabled: boolean;
+  setNotificationsEnabled: (v: boolean) => void;
+  lowAlerted: Partial<Record<NetworkKey, boolean>>;
+
   setChecking: (network: NetworkKey, checking: boolean) => void;
   recordReading: (network: NetworkKey, balance: number, raw: string) => void;
   recordError: (network: NetworkKey, error: string) => void;
@@ -60,6 +67,10 @@ export const useFloatStore = create<State>()(
       setCheckIntervalHours: (hours) =>
         set({ checkIntervalHours: Math.max(0, hours) }),
 
+      notificationsEnabled: true,
+      setNotificationsEnabled: (v) => set({ notificationsEnabled: v }),
+      lowAlerted: {},
+
       setChecking: (network, checking) =>
         set((s) => ({ [network]: { ...s[network], checking } } as Partial<State>)),
 
@@ -73,6 +84,10 @@ export const useFloatStore = create<State>()(
             checking: false,
             lastError: null,
           },
+          lowAlerted:
+            balance >= s.lowBalanceThreshold
+              ? { ...s.lowAlerted, [network]: false }
+              : s.lowAlerted,
         } as Partial<State>)),
 
       recordError: (network, error) =>
