@@ -15,8 +15,12 @@ import com.facebook.react.jstasks.HeadlessJsTaskConfig
  */
 class SchedulerTaskService : HeadlessJsTaskService() {
 
-  override fun getTaskConfig(intent: Intent): HeadlessJsTaskConfig {
-    val extras: Bundle = intent.extras ?: Bundle()
+  // Signature must match the base class exactly: both the parameter and
+  // the return type are nullable in this RN version's HeadlessJsTaskService
+  // (fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig?) — a
+  // non-null signature here doesn't count as a valid override in Kotlin.
+  override fun getTaskConfig(intent: Intent?): HeadlessJsTaskConfig? {
+    val extras: Bundle = intent?.extras ?: Bundle()
     return HeadlessJsTaskConfig(
       "SchedulerCheckTask",
       Arguments.fromBundle(extras),
