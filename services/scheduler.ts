@@ -1,19 +1,30 @@
 /**
  * USSD Scheduler runtime.
  *
- * This loop polls every 30s for due items. On its own, a JS setInterval
- * only runs while the app's process is alive — Android is free to kill
- * a backgrounded process, which used to mean a schedule whose runAt time
- * passed while the app was closed would only fire once the app was
- * reopened.
+ * PREVIOUS FIX (kept, but no longer the primary mechanism): a native
+ * foreground service (SchedulerForegroundService) keeps this process
+ * alive in the background with a persistent low-priority notification.
+ * That protects the *process* from being killed — but Android can still
+ * tear down the Activity, and with it the JS instance running inside it
+ * (including this file's setInterval loop), independently of whether the
+ * native service and its notification are still alive. That's why a
+ * schedule due while backgrounded only ever fired on reopen: there was
+ * no JS running during that window to notice it was due.
  *
- * FIX: startSchedulerLoop() now also starts SchedulerForegroundService
- * (modules/scheduler-service), a native foreground service — modeled
- * directly on the SMS listener's SmsForegroundService — that keeps this
- * process alive in the background with a persistent low-priority
- * notification, the same way normal SMS-triggered transactions already
- * survive backgrounding. The scheduling logic below is unchanged; only
- * the process it runs inside is now protected from being killed.
+ * REAL FIX: the due-schedule check now also runs via Android's
+ * AlarmManager + a headless JS task (schedulerHeadlessTask.ts /
+ * SchedulerAlarmReceiver.kt), which boots a fresh, UI-less JS instance
+ * at exactly the next due time regardless of whether the Activity or any
+ * previous JS instance is alive. armNextAlarm() (schedulerAlarm.ts) runs
+ * at the end of every check here, and watchScheduleStoreForAlarm() keeps
+ * it in sync the moment a schedule is added, edited, or removed — so the
+ * interval loop, the headless task, and the UI all share one native
+ * alarm kept pointed at the next soonest due time.
+ *
+ * The setInterval loop itself is kept as-is: it's still useful while the
+ * app is open, since it's more responsive than waiting for an exact
+ * alarm to fire. It is simply no longer relied on for correctness while
+ * backgrounded.
  */
 
 import { useScheduleStore } from '../store/useScheduleStore';
@@ -22,6 +33,7 @@ import { useActivityStore } from '../store/useActivityStore';
 import { manualDeliver } from './smsAutomation';
 import { runDueFloatChecks } from './floatCheck';
 import SchedulerService from '../modules/scheduler-service/src/SchedulerServiceModule';
+import { armNextAlarm, watchScheduleStoreForAlarm } from './schedulerAlarm';
 
 const CHECK_INTERVAL_MS = 30000;
 
@@ -59,6 +71,11 @@ export function startSchedulerLoop() {
     void runDueSchedules();
   }, CHECK_INTERVAL_MS);
 
+  // Keeps the native alarm pointed at the next soonest due item any time
+  // a schedule is added/edited/removed from the UI, not just after a
+  // check completes.
+  watchScheduleStoreForAlarm();
+
   void runDueSchedules();
 }
 
@@ -79,9 +96,25 @@ export function stopSchedulerLoop() {
     clearInterval(intervalHandle);
     intervalHandle = null;
   }
+
+  // Also cancel the native alarm — otherwise a headless task could still
+  // fire after the user has explicitly stopped the scheduler.
+  if (typeof SchedulerService.cancelAlarm === 'function') {
+    try {
+      SchedulerService.cancelAlarm();
+    } catch {
+      // Non-fatal.
+    }
+  }
 }
 
-async function runDueSchedules() {
+/**
+ * Exported (was module-private) so schedulerHeadlessTask.ts can call the
+ * exact same due-schedule logic from a headless JS instance — there is
+ * no duplicated implementation between the foreground and background
+ * paths.
+ */
+export async function runDueSchedules() {
   if (running) return;
   running = true;
 
@@ -114,9 +147,17 @@ async function runDueSchedules() {
     }
 
     // Float/balance check — cheap no-op unless checkIntervalHours has
-    // elapsed for a network; shares this same 30s loop rather than
-    // running its own timer.
+    // elapsed for a network; shares this same check rather than running
+    // its own timer.
     await runDueFloatChecks();
+
+    // Re-arm the single native alarm for whatever is now the next
+    // soonest due item (recordRun() above will have already advanced
+    // any recurring items that just fired). Runs after every check —
+    // from the interval loop while foregrounded, and from the headless
+    // task while backgrounded — so the chain of alarms keeps itself
+    // going without ever depending on the app being reopened.
+    await armNextAlarm();
   } finally {
     running = false;
   }
