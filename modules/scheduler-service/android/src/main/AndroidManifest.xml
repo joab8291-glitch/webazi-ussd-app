@@ -12,6 +12,17 @@
          so scheduled transactions aren't throttled/killed by the OS -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Required for AlarmManager.setExactAndAllowWhileIdle() to fire a schedule
+         check at (near) the exact due time, independent of whether the app's
+         JS instance is alive. On API 33+ the user must grant this explicitly
+         (see requestExactAlarmPermission) — falls back to an inexact wake if
+         not granted. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Required to re-arm the schedule alarm after a device reboot, since
+         AlarmManager alarms are cleared on every boot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application>
 
         <!-- Foreground service that keeps the JS scheduler's setInterval loop
@@ -22,6 +33,29 @@
             android:foregroundServiceType="dataSync"
             android:exported="false"
             android:label="Webazi Scheduler" />
+
+        <!-- Fired by AlarmManager at the next due-schedule time, independent
+             of whether the Activity/JS instance is currently alive. Boots
+             SchedulerTaskService to run the check via a headless JS task. -->
+        <receiver
+            android:name=".SchedulerAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Re-arms the alarm after a reboot, since AlarmManager wipes all
+             alarms on boot. -->
+        <receiver
+            android:name=".SchedulerBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- HeadlessJsTaskService that boots a UI-less JS instance to run
+             "SchedulerCheckTask" (registered in the app's root index.js). -->
+        <service
+            android:name=".SchedulerTaskService"
+            android:exported="false" />
 
     </application>
 
