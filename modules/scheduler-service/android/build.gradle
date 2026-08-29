@@ -41,3 +41,18 @@ android {
     abortOnError false
   }
 }
+
+// Needed for SchedulerAlarmReceiver / SchedulerTaskService / SchedulerBootReceiver,
+// which call into com.facebook.react.HeadlessJsTaskService (and its
+// Arguments/HeadlessJsTaskConfig helpers) to boot the "SchedulerCheckTask"
+// headless JS task. useCoreDependencies() above only pulls in
+// expo-modules-core — it does not expose the React Native Android
+// artifact to this module's own compile classpath, so it has to be
+// declared here explicitly. No version is pinned: the React Native
+// Gradle Plugin, applied at the root project during prebuild, substitutes
+// this in with whatever RN version the app itself is on (0.81.5 here),
+// the same way it does for the app module — so this stays correct across
+// RN upgrades without needing to be bumped by hand.
+dependencies {
+  implementation("com.facebook.react:react-android")
+}
