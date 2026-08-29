@@ -10,6 +10,14 @@ declare class SchedulerServiceModule extends NativeModule<{}> {
   stopForegroundService(): void;
   isIgnoringBatteryOptimizations(): boolean;
   requestIgnoreBatteryOptimizations(): void;
+
+  // AlarmManager-backed exact wake — fires "SchedulerCheckTask" (a
+  // headless JS task) even when no JS instance is currently alive. See
+  // services/schedulerAlarm.ts for the caller.
+  scheduleNextAlarm(triggerAtMillis: number): 'scheduled_exact' | 'scheduled_inexact' | 'no_context';
+  cancelAlarm(): void;
+  isExactAlarmPermissionGranted(): boolean;
+  requestExactAlarmPermission(): void;
 }
 
 export default requireNativeModule<SchedulerServiceModule>('SchedulerService');
