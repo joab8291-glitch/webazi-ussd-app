@@ -1,10 +1,19 @@
 /**
  * USSD Scheduler runtime.
  *
- * IMPORTANT: this app has no background task runner (no expo-task-manager /
- * background-fetch installed). A schedule only fires while the app is open
- * — this loop polls every 30s for due items. A schedule whose runAt time
- * passed while the app was closed fires as soon as the app is reopened.
+ * This loop polls every 30s for due items. On its own, a JS setInterval
+ * only runs while the app's process is alive — Android is free to kill
+ * a backgrounded process, which used to mean a schedule whose runAt time
+ * passed while the app was closed would only fire once the app was
+ * reopened.
+ *
+ * FIX: startSchedulerLoop() now also starts SchedulerForegroundService
+ * (modules/scheduler-service), a native foreground service — modeled
+ * directly on the SMS listener's SmsForegroundService — that keeps this
+ * process alive in the background with a persistent low-priority
+ * notification, the same way normal SMS-triggered transactions already
+ * survive backgrounding. The scheduling logic below is unchanged; only
+ * the process it runs inside is now protected from being killed.
  */
 
 import { useScheduleStore } from '../store/useScheduleStore';
@@ -12,6 +21,7 @@ import type { ScheduledDial } from '../store/useScheduleStore';
 import { useActivityStore } from '../store/useActivityStore';
 import { manualDeliver } from './smsAutomation';
 import { runDueFloatChecks } from './floatCheck';
+import SchedulerService from '../modules/scheduler-service/src/SchedulerServiceModule';
 
 const CHECK_INTERVAL_MS = 30000;
 
@@ -21,6 +31,17 @@ let running = false;
 export function startSchedulerLoop() {
   if (intervalHandle) return;
 
+  // Keep the process alive so this interval survives backgrounding.
+  // Guarded: safe to call even before a native rebuild has added this
+  // module — falls back to the previous foreground-only behavior.
+  if (typeof SchedulerService.startForegroundService === 'function') {
+    try {
+      SchedulerService.startForegroundService();
+    } catch {
+      // Non-fatal — scheduler still runs while the app is foregrounded.
+    }
+  }
+
   intervalHandle = setInterval(() => {
     void runDueSchedules();
   }, CHECK_INTERVAL_MS);
@@ -29,6 +50,18 @@ export function startSchedulerLoop() {
 }
 
 export function stopSchedulerLoop() {
+  // Stop the foreground service alongside the interval — see the note
+  // in Section 4 of the accompanying fix doc if this service is later
+  // merged with the SMS listener's into one shared service, since that
+  // would need reference counting instead of an unconditional stop here.
+  if (typeof SchedulerService.stopForegroundService === 'function') {
+    try {
+      SchedulerService.stopForegroundService();
+    } catch {
+      // Non-fatal.
+    }
+  }
+
   if (intervalHandle) {
     clearInterval(intervalHandle);
     intervalHandle = null;
