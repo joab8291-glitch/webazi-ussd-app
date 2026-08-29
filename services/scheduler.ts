@@ -34,12 +34,25 @@ export function startSchedulerLoop() {
   // Keep the process alive so this interval survives backgrounding.
   // Guarded: safe to call even before a native rebuild has added this
   // module — falls back to the previous foreground-only behavior.
+  //
+  // DIAGNOSTIC (temporary): logs the outcome to the Activity Log instead
+  // of silently swallowing it, so a failure is visible on-device without
+  // needing adb/logcat access. Remove once the foreground service is
+  // confirmed working reliably.
+  const log = useActivityStore.getState().addLog;
   if (typeof SchedulerService.startForegroundService === 'function') {
     try {
       SchedulerService.startForegroundService();
-    } catch {
-      // Non-fatal — scheduler still runs while the app is foregrounded.
+      log('info', 'Scheduler foreground service: startForegroundService() called successfully');
+    } catch (e: any) {
+      log('warn', `Scheduler foreground service failed to start: ${String(e?.message ?? e)}`);
     }
+  } else {
+    log(
+      'warn',
+      'Scheduler foreground service: SchedulerService.startForegroundService is not a function ' +
+        '(native module not linked in this build)'
+    );
   }
 
   intervalHandle = setInterval(() => {
