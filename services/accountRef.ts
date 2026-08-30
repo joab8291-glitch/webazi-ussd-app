@@ -44,12 +44,20 @@ export function decodeAccountRef(ref: string): DecodedRef | null {
 }
 
 /**
- * Pulls the "for account XXXXXXXXXX" reference out of an M-PESA
- * confirmation SMS. Returns null if the SMS has no account reference
- * (e.g. it's not a till/paybill payment at all).
+ * Pulls the account reference out of an M-PESA confirmation SMS.
+ * Two phrasings appear in the wild for the exact same field:
+ *   - "for account XXXXXXXXXX"    (seen on some STK/Till confirmations)
+ *   - "Account Number XXXXXXXXXX" (seen on Paybill/Utility confirmations)
+ * A compact webazi ref (buildAccountRef()'s S/A + base36 amount + base36
+ * phone) can land in either phrasing depending on how the payment was
+ * made, so both must be tried here — otherwise a perfectly decodable
+ * ref falls through to decodePaybillSms() (which only accepts a plain
+ * digits-only phone number) and ends up Unmatched.
+ * Returns null if the SMS has no account reference at all (e.g. it's
+ * not a till/paybill payment).
  */
 export function extractAccountRef(smsBody: string): string | null {
-  const match = smsBody.match(/for account\s+([A-Za-z0-9]+)/i);
+  const match = smsBody.match(/(?:for account|Account Number)\s+([A-Za-z0-9]+)/i);
   return match ? match[1] : null;
 }
 
