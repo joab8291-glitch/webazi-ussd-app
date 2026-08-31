@@ -161,10 +161,24 @@ export default function SettingsScreen() {
           <Text style={{ color: c.tint, fontWeight: '600' }}>Disable battery optimization</Text>
         </Pressable>
         <Text style={{ color: c.muted, fontSize: 11, lineHeight: 16 }}>
-          The SMS listener also restarts itself if the app is swiped away from Recents. Some phone
-          makers (Xiaomi/MIUI, Oppo, Vivo, Huawei) still throttle background apps even with this
-          granted — you may also need to enable "Autostart" for Webazi in their own battery settings.
-          No app can fully guarantee this from code.
+          The SMS listener also restarts itself if the app is swiped away from Recents, and every 5
+          minutes via a self-healing check while it's on. Some phone makers (Xiaomi/MIUI, Oppo, Vivo,
+          Huawei) still throttle background apps even with this granted — you may also need to enable
+          "Autostart" for Webazi in their own battery settings. No app can fully guarantee this from
+          code.
+        </Text>
+
+        <View style={[styles.divider, { backgroundColor: c.border }]} />
+
+        <ToggleRow
+          label="Auto-relaunch app after reboot"
+          value={appSettings.relaunchAppOnBoot}
+          onChange={appSettings.setRelaunchAppOnBoot}
+          colors={c}
+        />
+        <Text style={{ color: c.muted, fontSize: 11, marginTop: -6 }}>
+          If the listener was active before a restart, bring Webazi's UI to the front 5 seconds after
+          boot. Requires a native rebuild.
         </Text>
       </Section>
 
