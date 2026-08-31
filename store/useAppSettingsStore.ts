@@ -2,6 +2,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+import SmsListener from '../modules/sms-listener/src/SmsListenerModule';
+
 /**
  * Local app-wide tuning knobs, mirroring Bingwa's "USSD Settings" screen:
  * verified senders, dialog/screen behavior around dialing, timeouts,
@@ -74,6 +76,13 @@ type State = {
   setLastDailySummaryAt: (iso: string) => void;
   lastWeeklySummaryAt: string | null;
   setLastWeeklySummaryAt: (iso: string) => void;
+
+  // Auto-relaunch the app 5s after a device reboot, if the SMS listener was
+  // active beforehand. Mirrored to a native flag (SmsBootReceiver reads it,
+  // not this store) every time it changes, since the boot receiver runs
+  // outside any JS instance and can't reach AsyncStorage/zustand.
+  relaunchAppOnBoot: boolean;
+  setRelaunchAppOnBoot: (v: boolean) => void;
 };
 
 export const useAppSettingsStore = create<State>()(
@@ -138,6 +147,21 @@ export const useAppSettingsStore = create<State>()(
       setLastDailySummaryAt: (iso) => set({ lastDailySummaryAt: iso }),
       lastWeeklySummaryAt: null,
       setLastWeeklySummaryAt: (iso) => set({ lastWeeklySummaryAt: iso }),
+
+      relaunchAppOnBoot: false,
+      setRelaunchAppOnBoot: (v) => {
+        set({ relaunchAppOnBoot: v });
+        // Requires a native rebuild — guarded so this still works against
+        // an older build of the sms-listener module.
+        if (typeof SmsListener.setRelaunchAppOnBootEnabled === 'function') {
+          try {
+            SmsListener.setRelaunchAppOnBootEnabled(v);
+          } catch {
+            // Ignore — worst case the native flag falls out of sync until
+            // the next toggle, no crash risk either way.
+          }
+        }
+      },
     }),
     {
       name: 'webazi-app-settings-store',
