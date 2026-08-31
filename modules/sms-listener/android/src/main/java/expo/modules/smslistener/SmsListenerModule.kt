@@ -77,6 +77,11 @@ class SmsListenerModule : Module() {
 
     // Starts the foreground service that keeps this module's BroadcastReceiver
     // alive in the background. Safe to call even if already running.
+    //
+    // Also persists a native "listening active" flag and arms the 5-minute
+    // self-healing heartbeat (SmsPrefs/SmsHeartbeatReceiver) — both the
+    // heartbeat and SmsBootReceiver read this flag to decide whether they
+    // should be restarting anything at all.
     Function("startForegroundService") {
       val context = appContext.reactContext ?: return@Function null
 
@@ -87,12 +92,20 @@ class SmsListenerModule : Module() {
       } else {
         context.startService(intent)
       }
+
+      SmsPrefs.setListeningActive(context, true)
+      SmsPrefs.scheduleHeartbeat(context)
     }
 
-    // Stops the foreground service.
+    // Stops the foreground service, clears the active flag, and cancels the
+    // heartbeat — otherwise a stray alarm would resurrect a service the user
+    // deliberately turned off.
     Function("stopForegroundService") {
       val context = appContext.reactContext ?: return@Function null
       context.stopService(Intent(context, SmsForegroundService::class.java))
+
+      SmsPrefs.setListeningActive(context, false)
+      SmsPrefs.cancelHeartbeat(context)
     }
 
     // Whether the app is currently exempt from Android's battery
@@ -122,6 +135,20 @@ class SmsListenerModule : Module() {
       context.startActivity(intent)
     }
 
+    // "Auto-relaunch app after reboot" setting, read by SmsBootReceiver.
+    // Persisted natively (not AsyncStorage) since the boot receiver runs
+    // outside any JS instance. Called from useAppSettingsStore whenever the
+    // JS-side toggle changes, so the two stay in sync.
+    Function("setRelaunchAppOnBootEnabled") { enabled: Boolean ->
+      val context = appContext.reactContext ?: return@Function null
+      SmsPrefs.setRelaunchAppOnBootEnabled(context, enabled)
+    }
+
+    Function("isRelaunchAppOnBootEnabled") {
+      val context = appContext.reactContext ?: return@Function false
+      SmsPrefs.isRelaunchAppOnBootEnabled(context)
+    }
+    
     // Scans the device's actual SMS inbox for messages received on the given
     // subscription since `sinceMillis`, for the "missed messages while the
     // app/process was killed" recovery path. Requires READ_SMS (already
