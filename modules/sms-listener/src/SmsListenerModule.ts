@@ -16,7 +16,12 @@ declare class SmsListenerModule extends NativeModule<SmsListenerModuleEvents> {
   // require a native rebuild — guard with `typeof X === 'function'`.
   isIgnoringBatteryOptimizations(): boolean;
   requestIgnoreBatteryOptimizations(): void;
-}
+  // "Auto-relaunch app after reboot" — persisted natively so the boot
+  // receiver can read it without a JS instance. Requires a native rebuild —
+  // guard with `typeof X === 'function'`.
+  setRelaunchAppOnBootEnabled(enabled: boolean): void;
+  isRelaunchAppOnBootEnabled(): boolean;
+  }
 
 // This call loads the native module object from the JSI.
 export default requireNativeModule<SmsListenerModule>('SmsListener');
