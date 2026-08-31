@@ -15,6 +15,11 @@
          so the background SMS listener isn't throttled/killed by the OS -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Required to restart the listener's foreground service after a device
+         reboot, since both the process and any AlarmManager alarms are wiped
+         on every boot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
     <application>
 
         <!-- Foreground service that keeps startListening()'s BroadcastReceiver
@@ -25,6 +30,25 @@
             android:foregroundServiceType="dataSync"
             android:exported="false"
             android:label="Webazi SMS Listener" />
+
+        <!-- Fired every ~5 minutes by AlarmManager while the listener is
+             active. Restarts SmsForegroundService if Android silently killed
+             it — the self-healing heartbeat loop. -->
+        <receiver
+            android:name=".SmsHeartbeatReceiver"
+            android:exported="false" />
+
+        <!-- Restarts the listener's foreground service (and re-arms the
+             heartbeat) after a reboot, if it was active beforehand. Optionally
+             relaunches the app 5 seconds later if "Auto-relaunch app after
+             reboot" is enabled. -->
+        <receiver
+            android:name=".SmsBootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
